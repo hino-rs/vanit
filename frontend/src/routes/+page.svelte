@@ -438,12 +438,6 @@
 		margin-bottom: 0.5rem;
 	}
 
-	.logs-header h3 {
-		margin: 0;
-		font-size: 1rem;
-		color: #424242;
-	}
-
 	.logs {
 		height: 300px;
 		overflow-y: auto;
@@ -489,9 +483,6 @@
 		color: #555;
 		font-style: italic;
 		justify-content: center;
-	}
-	.log-item.system .time {
-		display: none;
 	}
 
 	.log-item.sent {
