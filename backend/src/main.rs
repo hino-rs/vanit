@@ -7,20 +7,79 @@ use axum::{
     response::IntoResponse,
     routing::get,
 };
+use dashmap::DashMap;
 use futures::{SinkExt, StreamExt};
 use std::{net::SocketAddr, sync::Arc};
-use tokio::sync::{Mutex, mpsc, oneshot};
+use tokio::sync::mpsc;
 use tower_http::cors::CorsLayer;
+use uuid::Uuid;
 
-/// 待機中のユーザー
-type PeerInfo = (
-    mpsc::UnboundedSender<String>,
-    oneshot::Sender<mpsc::UnboundedSender<String>>,
-);
+type Tx = mpsc::UnboundedSender<String>;
 
 #[derive(Default)]
 struct AppState {
-    waiting_peer: Mutex<Option<PeerInfo>>,
+    pair_manager: PairManager,
+}
+
+/// ペア管理システム
+#[derive(Default)]
+struct PairManager {
+    /// 待機中のユーザー (my_id -> my_tx)
+    waiting: DashMap<Uuid, Tx>,
+    /// ペアリング済みのユーザー (my_id -> (partner_id, partner_tx))
+    active_pairs: DashMap<Uuid, (Uuid, Tx)>,
+}
+
+impl PairManager {
+    /// ユーザーが参加したときの処理
+    fn register(&self, my_id: Uuid, my_tx: Tx) -> Option<(Uuid, Tx)> {
+        // 待機中のIDを1つ取得 (スコープを区切ってReadLockを即座に解放する)
+        let partner_id = { self.waiting.iter().next().map(|entry| *entry.key()) };
+
+        if let Some(partner_id) = partner_id {
+            // 待合室から相手を削除(取れればマッチ成功)
+            if let Some((_, partner_tx)) = self.waiting.remove(&partner_id) {
+                // 双方向にactive_pairsへ登録
+                self.active_pairs
+                    .insert(my_id, (partner_id, partner_tx.clone()));
+                self.active_pairs.insert(partner_id, (my_id, my_tx.clone()));
+
+                return Some((partner_id, partner_tx));
+            }
+        }
+
+        // 待機者がいなければ自分が待合室に入る
+        self.waiting.insert(my_id, my_tx);
+        None
+    }
+
+    /// メッセージを相手に転送する
+    fn send_to_partner(&self, my_id: &Uuid, message: String) -> Result<(), &'static str> {
+        let partner_tx = self
+            .active_pairs
+            .get(my_id)
+            .map(|guard| guard.value().1.clone());
+
+        if let Some(tx) = partner_tx {
+            tx.send(message).map_err(|_| "送信失敗")
+        } else {
+            Err("パートナーが見つかりません")
+        }
+    }
+
+    /// 切断時のクリーンアップ
+    fn unregister(&self, my_id: &Uuid) {
+        // 待合室にいれば削除
+        self.waiting.remove(my_id);
+
+        // アクティブペアにいれば自分と相手のペアリングを解除
+        if let Some((_, (partner_id, partner_tx))) = self.active_pairs.remove(my_id) {
+            // 相手側のペアリング情報も削除する
+            self.active_pairs.remove(&partner_id);
+            // 相手に切断メッセージを通知
+            let _ = partner_tx.send("パートナーが切断しました。".into());
+        }
+    }
 }
 
 #[tokio::main]
@@ -47,47 +106,31 @@ async fn ws_handler(State(state): State<Arc<AppState>>, ws: WebSocketUpgrade) ->
 }
 
 async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
+    let my_id = Uuid::new_v4();
     // 自分の受信ボックスを作る
     let (my_tx, mut my_rx) = mpsc::unbounded_channel::<String>();
-    let partner_tx: mpsc::UnboundedSender<String>;
+
+    let (mut ws_sender, mut ws_receiver) = socket.split();
 
     // === ペアリング処理 ===
-    // 待合室を確認
-    let mut lock = state.waiting_peer.lock().await;
-    if let Some((waiting_tx, oneshot_tx)) = lock.take() {
-        // --- 既に誰かが待機していた場合 ---
-        // 相手の宛先を自分のpartner_txにセット
-        partner_tx = waiting_tx;
-        // 相手に自分の宛先を教える
-        let _ = oneshot_tx.send(my_tx);
-
-        drop(lock);
+    if let Some((_partner_id, partner_tx)) = state.pair_manager.register(my_id, my_tx) {
+        // 後から参加した側がマッチングを完成させた場合
+        let _ = ws_sender
+            .send(Message::Text("ペアリングが完了しました！".into()))
+            .await;
+        // 待機中だった相手にもペアリング完了を通知
+        let _ = partner_tx.send("ペアリングが完了しました！".into());
     } else {
-        // --- 誰も待っていなかった場合 ---
-        // 1回限りの通信チャネルを作る
-        let (oneshot_tx, oneshot_rx) = oneshot::channel();
-        // 自分の宛先と返事をもらうためのチャネルを待合室に置いておく
-        *lock = Some((my_tx, oneshot_tx));
-        drop(lock);
-
-        // 誰かが来て、自分に宛先を教えてくれるまで待つ
-        match oneshot_rx.await {
-            // 相手が来たらもらった宛先をpartner_txにセット
-            Ok(tx) => partner_tx = tx,
-            Err(_) => return,
-        }
+        // 待合室に入って相手を待つ場合
+        let _ = ws_sender
+            .send(Message::Text("対戦相手を待っています...".into()))
+            .await;
     }
-
-    // ペアリング出来たらクライアントに完了を伝える
-    let (mut ws_sender, mut ws_receiver) = socket.split();
-    let _ = ws_sender
-        .send(Message::Text("ペアリングが完了しました！".into()))
-        .await;
 
     // === メッセージの送受信ループ ===
     loop {
         tokio::select! {
-            // パートナーからメッセージが届いたとき
+            // パートナーまたはシステムからメッセージが届いたとき
             some_msg = my_rx.recv() => {
                 match some_msg {
                     Some(msg) => {
@@ -97,8 +140,7 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
                         }
                     }
                     None => {
-                        // パートナー側の通信チャネルが切断された場合
-                        let _ = ws_sender.send(Message::Text("パートナーが切断しました。".into())).await;
+                        // 通信チャネルが切断された場合
                         break;
                     }
                 }
@@ -108,7 +150,7 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
                 match ws_msg {
                     Some(Ok(Message::Text(text))) => {
                         // パートナーの宛先へ送信
-                        if partner_tx.send(text.to_string()).is_err() {
+                        if state.pair_manager.send_to_partner(&my_id, text.to_string()).is_err() {
                             let _ = ws_sender.send(Message::Text("パートナーへの送信に失敗しました。".into())).await;
                             break;
                         }
@@ -127,4 +169,7 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
             }
         }
     }
+
+    // === クリーンアップ ===
+    state.pair_manager.unregister(&my_id);
 }
