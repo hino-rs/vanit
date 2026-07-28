@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onDestroy } from 'svelte';
+	import { onMount } from 'svelte';
 
 	type ConnectionStatus = 'disconnected' | 'connecting' | 'waiting' | 'paired';
 	type LogType = 'sent' | 'received' | 'system';
@@ -19,6 +20,27 @@
 	let logsContainer: HTMLDivElement | null = $state(null);
 	let partnerText = $state<string>('');
 	let lang: HTMLSelectElement | undefined = $state();
+	let waiting_count = $state(0);
+	let matched_count = $state(0);
+
+	async function fetchPeopleCount() {
+		try {
+			const res = await fetch('http://localhost:3000/get_people_count');
+			let data = await res.json();
+			waiting_count = data["waiting"];
+			matched_count = data["matched"];
+		} catch (err) {
+			console.error(err);
+		}
+	}
+
+	onMount(() =>  {
+		fetchPeopleCount();
+
+		const interval = setInterval(fetchPeopleCount, 1000);
+		
+		return () => clearInterval(interval);
+	});
 
 	function getCurrentTime(): string {
 		const now = new Date();
@@ -121,6 +143,14 @@
 	<header class="header">
 		<h2>Vanit WebSocket ペアリングチャット</h2>
 		<p class="subtitle">2つのブラウザウィンドウで「接続」するとペアリングが成立します</p>
+
+		<div>
+			<ol>
+				<li>待機中: {waiting_count}人</li>
+				<li>接続済み: {matched_count}人</li>
+				<li>総ユーザー数: {waiting_count + matched_count}人</li>
+			</ol>
+		</div>
 	</header>
 
 	<!-- ステータスバー -->

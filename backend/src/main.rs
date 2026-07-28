@@ -1,5 +1,5 @@
 use axum::{
-    Router,
+    Json, Router,
     extract::{
         Query, State,
         ws::{Message, WebSocket, WebSocketUpgrade},
@@ -11,7 +11,14 @@ use dashmap::DashMap;
 use futures::{SinkExt, StreamExt};
 use log::info;
 use serde::Deserialize;
-use std::{net::SocketAddr, sync::Arc};
+use serde_json::json;
+use std::{
+    net::SocketAddr,
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    },
+};
 use tokio::sync::mpsc;
 use tower_http::cors::CorsLayer;
 use uuid::Uuid;
@@ -84,6 +91,8 @@ struct PairManager {
     waiting: DashMap<Uuid, User>,
     /// ペアリング済みのユーザー
     active_pairs: DashMap<Uuid, (Uuid, Tx)>,
+    /// 接続済みユーザー数
+    matched_count: AtomicU64,
 }
 
 impl PairManager {
@@ -91,30 +100,26 @@ impl PairManager {
     fn register(&self, my_id: Uuid, my_data: User) -> Option<(Uuid, Tx)> {
         // 待機中のIDを1つ取得 (スコープを区切ってReadLockを即座に解放する)
         let partner_id = {
-            if let Some(user) = self
-                .waiting
+            self.waiting
                 .iter()
                 .find(|user| user.language == my_data.language)
-            {
-                Some(*user.key())
-            } else {
-                None
-            }
+                .map(|user| *user.key())
         };
 
         // 待合室から相手を削除
-        if let Some(partner_id) = partner_id {
-            if let Some((_, partner_data)) = self.waiting.remove(&partner_id) {
-                if partner_data.language == my_data.language {
-                    info!("ペア成立: {:?}", partner_data.language);
-                    // 双方向にactive_pairsへ登録
-                    self.active_pairs
-                        .insert(my_id, (partner_id, partner_data.tx.clone()));
-                    self.active_pairs
-                        .insert(partner_id, (my_id, my_data.tx.clone()));
+        if let Some(partner_id) = partner_id
+            && let Some((_, partner_data)) = self.waiting.remove(&partner_id)
+        {
+            self.matched_count.fetch_add(2, Ordering::Relaxed);
+            if partner_data.language == my_data.language {
+                info!("ペア成立: {:?}", partner_data.language);
+                // 双方向にactive_pairsへ登録
+                self.active_pairs
+                    .insert(my_id, (partner_id, partner_data.tx.clone()));
+                self.active_pairs
+                    .insert(partner_id, (my_id, my_data.tx.clone()));
 
-                    return Some((partner_id, partner_data.tx));
-                }
+                return Some((partner_id, partner_data.tx));
             }
         }
 
@@ -145,11 +150,20 @@ impl PairManager {
 
         // アクティブペアにいれば自分と相手のペアリングを解除
         if let Some((_, (partner_id, partner_tx))) = self.active_pairs.remove(my_id) {
+            self.matched_count.fetch_sub(2, Ordering::Relaxed);
             // 相手側のペアリング情報も削除する
             self.active_pairs.remove(&partner_id);
             // 相手に切断メッセージを通知
             let _ = partner_tx.send("パートナーが切断しました。".into());
         }
+    }
+
+    /// 待機中の人数を返す(マッチング者数, 待機者数)
+    async fn count_data(&self) -> (u64, u64) {
+        (
+            self.matched_count.load(Ordering::Relaxed),
+            self.waiting.len() as u64,
+        )
     }
 }
 
@@ -163,6 +177,7 @@ async fn main() -> Result<(), anyhow::Error> {
 
     let app = Router::new()
         .route("/ws", get(ws_handler))
+        .route("/get_people_count", get(get_people_count))
         .with_state(state)
         .layer(cors);
 
@@ -173,6 +188,11 @@ async fn main() -> Result<(), anyhow::Error> {
     axum::serve(listener, app).await?;
 
     Ok(())
+}
+
+async fn get_people_count(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    let (matched, waiting) = state.pair_manager.count_data().await;
+    Json(json!({ "matched": matched, "waiting": waiting }))
 }
 
 async fn ws_handler(
