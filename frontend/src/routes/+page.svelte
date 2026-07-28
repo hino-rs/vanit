@@ -18,6 +18,7 @@
 	let logs = $state<LogItem[]>([]); // チャットの履歴
 	let logsContainer: HTMLDivElement | null = $state(null);
 	let partnerText = $state<string>('');
+	let lang: HTMLSelectElement | undefined = $state();
 
 	function getCurrentTime(): string {
 		const now = new Date();
@@ -42,7 +43,7 @@
 		isPaired = false;
 		addLog('WebSocket サーバー (ws://127.0.0.1:3000/ws) へ接続中...', 'system');
 
-		socket = new WebSocket('ws://127.0.0.1:3000/ws');
+		socket = new WebSocket(`ws://127.0.0.1:3000/ws?lang=${lang ? lang.value : 'en'}`);
 
 		socket.onopen = () => {
 			status = 'waiting';
@@ -139,6 +140,24 @@
 			</span>
 		</div>
 
+		<select bind:this={lang}>
+			<option value="ja">Japanese</option>
+			<option value="en">English</option>
+			<option value="zh">Chinese</option>
+			<option value="hi">Hindi</option>
+			<option value="es">Spanish</option>
+			<option value="ar">Arabic</option>
+			<option value="fr">French</option>
+			<option value="bn">Bengali</option>
+			<option value="pt">Portuguese</option>
+			<option value="id">Indonesian</option>
+			<option value="ur">Urdu</option>
+			<option value="ru">Russian</option>
+			<option value="de">German</option>
+			<option value="pcm">Nigerian Pidgin</option>
+			<option value="arz">Egyptian Arabic</option>
+		</select>
+
 		<div class="actions">
 			{#if status === 'disconnected'}
 				<button class="btn primary" onclick={connect}>接続する</button>
@@ -170,13 +189,13 @@
 			<label for="user-input" class="box-label">自分のメッセージ</label>
 			<input
 				id="user-input"
-        class="message"
+				class="message"
 				type="text"
 				bind:value={inputText}
 				disabled={!isPaired}
 				// onchange={sendMessage}
-        // onkeypress={sendMessage}
-        oninput={sendMessage}
+				// onkeypress={sendMessage}
+				oninput={sendMessage}
 				placeholder={isPaired
 					? 'メッセージを入力してください...'
 					: '接続してペアリングすると入力できます'}

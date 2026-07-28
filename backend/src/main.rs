@@ -1,7 +1,7 @@
 use axum::{
     Router,
     extract::{
-        State,
+        Query, State,
         ws::{Message, WebSocket, WebSocketUpgrade},
     },
     response::IntoResponse,
@@ -9,12 +9,68 @@ use axum::{
 };
 use dashmap::DashMap;
 use futures::{SinkExt, StreamExt};
+use log::info;
+use serde::Deserialize;
 use std::{net::SocketAddr, sync::Arc};
 use tokio::sync::mpsc;
 use tower_http::cors::CorsLayer;
 use uuid::Uuid;
 
 type Tx = mpsc::UnboundedSender<String>;
+
+#[derive(Deserialize)]
+struct ConnectQuery {
+    lang: String,
+}
+
+#[derive(Clone, Default, Debug, PartialEq)]
+enum Language {
+    Japanese,
+    #[default]
+    English,
+    Chinese,
+    Hindi,
+    Spanish,
+    Arabic,
+    French,
+    Bengali,
+    Portuguese,
+    Indonesian,
+    Urdu,
+    Russian,
+    German,
+    NigerianPidgin,
+    EgyptianArabic,
+}
+
+impl Language {
+    fn from_str(str: &str) -> Language {
+        match str {
+            "ja" => Self::Japanese,
+            "en" => Self::English,
+            "zh" => Self::Chinese,
+            "hi" => Self::Hindi,
+            "es" => Self::Spanish,
+            "ar" => Self::Arabic,
+            "fr" => Self::French,
+            "bn" => Self::Bengali,
+            "pt" => Self::Portuguese,
+            "id" => Self::Indonesian,
+            "ur" => Self::Urdu,
+            "ru" => Self::Russian,
+            "de" => Self::German,
+            "pcm" => Self::NigerianPidgin,
+            "arz" => Self::EgyptianArabic,
+            _ => Self::default(),
+        }
+    }
+}
+
+#[derive(Clone)]
+struct User {
+    tx: Tx,
+    language: Language,
+}
 
 #[derive(Default)]
 struct AppState {
@@ -24,32 +80,47 @@ struct AppState {
 /// ペア管理システム
 #[derive(Default)]
 struct PairManager {
-    /// 待機中のユーザー (my_id -> my_tx)
-    waiting: DashMap<Uuid, Tx>,
-    /// ペアリング済みのユーザー (my_id -> (partner_id, partner_tx))
+    /// 待機中のユーザー
+    waiting: DashMap<Uuid, User>,
+    /// ペアリング済みのユーザー
     active_pairs: DashMap<Uuid, (Uuid, Tx)>,
 }
 
 impl PairManager {
     /// ユーザーが参加したときの処理
-    fn register(&self, my_id: Uuid, my_tx: Tx) -> Option<(Uuid, Tx)> {
+    fn register(&self, my_id: Uuid, my_data: User) -> Option<(Uuid, Tx)> {
         // 待機中のIDを1つ取得 (スコープを区切ってReadLockを即座に解放する)
-        let partner_id = { self.waiting.iter().next().map(|entry| *entry.key()) };
+        let partner_id = {
+            if let Some(user) = self
+                .waiting
+                .iter()
+                .find(|user| user.language == my_data.language)
+            {
+                Some(*user.key())
+            } else {
+                None
+            }
+        };
 
+        // 待合室から相手を削除
         if let Some(partner_id) = partner_id {
-            // 待合室から相手を削除(取れればマッチ成功)
-            if let Some((_, partner_tx)) = self.waiting.remove(&partner_id) {
-                // 双方向にactive_pairsへ登録
-                self.active_pairs
-                    .insert(my_id, (partner_id, partner_tx.clone()));
-                self.active_pairs.insert(partner_id, (my_id, my_tx.clone()));
+            if let Some((_, partner_data)) = self.waiting.remove(&partner_id) {
+                if partner_data.language == my_data.language {
+                    info!("ペア成立: {:?}", partner_data.language);
+                    // 双方向にactive_pairsへ登録
+                    self.active_pairs
+                        .insert(my_id, (partner_id, partner_data.tx.clone()));
+                    self.active_pairs
+                        .insert(partner_id, (my_id, my_data.tx.clone()));
 
-                return Some((partner_id, partner_tx));
+                    return Some((partner_id, partner_data.tx));
+                }
             }
         }
 
         // 待機者がいなければ自分が待合室に入る
-        self.waiting.insert(my_id, my_tx);
+        self.waiting.insert(my_id, my_data);
+        info!("待機中: {}人", self.waiting.len());
         None
     }
 
@@ -84,6 +155,9 @@ impl PairManager {
 
 #[tokio::main]
 async fn main() -> Result<(), anyhow::Error> {
+    env_logger::Builder::new()
+        .filter_level(log::LevelFilter::Info)
+        .init();
     let cors = CorsLayer::permissive();
     let state = Arc::new(AppState::default());
 
@@ -101,19 +175,28 @@ async fn main() -> Result<(), anyhow::Error> {
     Ok(())
 }
 
-async fn ws_handler(State(state): State<Arc<AppState>>, ws: WebSocketUpgrade) -> impl IntoResponse {
-    ws.on_upgrade(move |socket| handle_socket(socket, state))
+async fn ws_handler(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<ConnectQuery>,
+    ws: WebSocketUpgrade,
+) -> impl IntoResponse {
+    ws.on_upgrade(move |socket| handle_socket(socket, state, Language::from_str(&query.lang)))
 }
 
-async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
+async fn handle_socket(socket: WebSocket, state: Arc<AppState>, language: Language) {
     let my_id = Uuid::new_v4();
     // 自分の受信ボックスを作る
     let (my_tx, mut my_rx) = mpsc::unbounded_channel::<String>();
 
+    let user = User {
+        tx: my_tx,
+        language,
+    };
+
     let (mut ws_sender, mut ws_receiver) = socket.split();
 
     // === ペアリング処理 ===
-    if let Some((_partner_id, partner_tx)) = state.pair_manager.register(my_id, my_tx) {
+    if let Some((_partner_id, partner_tx)) = state.pair_manager.register(my_id, user) {
         // 後から参加した側がマッチングを完成させた場合
         let _ = ws_sender
             .send(Message::Text("ペアリングが完了しました！".into()))
