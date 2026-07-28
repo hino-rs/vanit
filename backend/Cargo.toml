@@ -11,3 +11,4 @@ axum = { version = "0.8.9", features = ["ws"] }
 tokio = { version = "1.53.1", features = ["full"] }
 tower-http = { version = "0.7.0", features = ["cors"] }
 anyhow = "1.0.104"
+dashmap = "6.2.1"
