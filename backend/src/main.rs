@@ -120,11 +120,6 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
             .await;
         // 待機中だった相手にもペアリング完了を通知
         let _ = partner_tx.send("ペアリングが完了しました！".into());
-    } else {
-        // 待合室に入って相手を待つ場合
-        let _ = ws_sender
-            .send(Message::Text("対戦相手を待っています...".into()))
-            .await;
     }
 
     // === メッセージの送受信ループ ===
