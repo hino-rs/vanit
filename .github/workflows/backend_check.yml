@@ -26,5 +26,17 @@ jobs:
         with:
           workspaces: "backend"
 
+      - name: Run test
+        run: cargo test --release --all
+
       - name: Run cargo check
         run: cargo check
+
+      - name: Run build
+        run: cargo build --release
+
+      - name: Run clippy
+        run: cargo clippy -- -D warnings
+
+      - name: Check formatting
+        run: cargo fmt --check

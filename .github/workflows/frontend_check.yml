@@ -37,3 +37,6 @@ jobs:
       # pnpm checkの実行
       - name: Run pnpm check
         run: pnpm run check
+
+      - name: Run build
+        run: pnpm build
