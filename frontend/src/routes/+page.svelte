@@ -26,18 +26,18 @@
 		try {
 			const res = await fetch('http://localhost:3000/get_people_count');
 			let data = await res.json();
-			waiting_count = data["waiting"];
-			matched_count = data["matched"];
+			waiting_count = data['waiting'];
+			matched_count = data['matched'];
 		} catch (err) {
 			console.error(err);
 		}
 	}
 
-	onMount(() =>  {
+	onMount(() => {
 		fetchPeopleCount();
 
 		const interval = setInterval(fetchPeopleCount, 1000);
-		
+
 		return () => clearInterval(interval);
 	});
 
@@ -138,24 +138,26 @@
 	});
 </script>
 
-<main class="max-w-6xl mx-auto px-4 font-sans">
-	<header class="mb-6 text-center">
-		<h1 class="text-3xl font-bold mb-1 text-zinc-900">Vanit</h1>
-
-		<div>
-			<ul class="flex justify-center gap-6 text-sm text-zinc-600">
-				<li>待機中: {waiting_count}人</li>
-				<li>接続済み: {matched_count}人</li>
-				<li>総ユーザー数: {waiting_count + matched_count}人</li>
-			</ul>
-		</div>
+<main class="mx-auto max-w-6xl px-4 font-sans">
+	<header class="text-center border-b mt-3 border-zinc-400">
+		<h1 class="mb-1 text-3xl font-bold text-zinc-900">Vanit</h1>
 	</header>
+	
+	<div>
+		<ul class="flex justify-center gap-6 text-sm text-zinc-600 mt-10">
+			<li>待機中: {waiting_count}人</li>
+			<li>接続済み: {matched_count}人</li>
+			<li>総ユーザー数: {waiting_count + matched_count}人</li>
+		</ul>
+	</div>
 
 	<!-- ステータスバー -->
-	<div class="bg-white border border-zinc-200 rounded-2xl p-4 mb-4 shadow-sm flex justify-between items-center">
+	<div
+		class="mb-4 flex items-center justify-between rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm"
+	>
 		<div class="flex items-center gap-2.5 font-semibold">
 			<span
-				class="w-3 h-3 rounded-full transition-colors duration-200 {status === 'paired'
+				class="h-3 w-3 rounded-full transition-colors duration-200 {status === 'paired'
 					? 'bg-green-700 shadow-[0_0_6px_rgba(46,125,50,0.5)]'
 					: status === 'waiting'
 						? 'bg-amber-600'
@@ -176,7 +178,11 @@
 			</span>
 		</div>
 
-		<select bind:this={lang} class="border border-zinc-300 rounded-md px-3 py-1.5 text-sm bg-white text-zinc-800 outline-none focus:border-blue-600 cursor-pointer">
+		<select
+			bind:this={lang}
+			class="select cursor-pointer rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-sm text-zinc-800 outline-none focus:border-blue-600"
+		>
+			<option disabled selected value="not-selected">Select your language</option>
 			<option value="ja">Japanese</option>
 			<option value="en">English</option>
 			<option value="zh">Chinese</option>
@@ -197,14 +203,14 @@
 		<div>
 			{#if status === 'disconnected'}
 				<button
-					class="px-5 py-2.5 rounded-md font-semibold text-[0.95rem] text-white bg-blue-600 hover:enabled:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200 cursor-pointer"
+					class="btn btn-outline btn-info"
 					onclick={connect}
 				>
 					接続する
 				</button>
 			{:else}
 				<button
-					class="px-5 py-2.5 rounded-md font-semibold text-[0.95rem] text-white bg-red-600 hover:enabled:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200 cursor-pointer"
+					class="btn btn-outline btn-secondary"
 					onclick={disconnect}
 				>
 					切断する
@@ -214,32 +220,40 @@
 	</div>
 
 	{#if status === 'waiting'}
-		<div class="px-4 py-3 rounded-lg text-[0.9rem] mb-4 bg-amber-50 border border-amber-300 text-amber-800">
+		<div
+			class="mb-4 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-[0.9rem] text-amber-800"
+		>
 			⏳ 相手の接続を待っています。別のタブまたはウィンドウで開いて「接続する」を押してください。
 		</div>
 	{/if}
 
 	<!-- やりとり表示 -->
-	<div class="bg-white border border-zinc-200 rounded-2xl p-4 mb-4 shadow-sm flex flex-col gap-5">
+	<div class="mb-4 flex flex-col gap-5 rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
 		<div class="flex flex-col gap-1.5">
 			<span class="text-[0.85rem] font-semibold text-zinc-600">相手のメッセージ</span>
-			<div class="bg-zinc-50 text-zinc-900 flex items-center break-all rounded-md">
+			<div class="flex items-center rounded-md bg-zinc-50 break-all text-zinc-900">
 				{#if partnerText}
-					<span class="w-full p-14 border border-zinc-300 rounded-md text-base min-h-[44px] transition-all duration-200">
+					<span
+						class="min-h-[44px] w-full rounded-md border border-zinc-300 p-14 text-base transition-all duration-200"
+					>
 						{partnerText}
 					</span>
 				{:else}
-					<span class="w-full p-14 border border-zinc-300 rounded-md text-[0.9rem] text-zinc-400 min-h-[44px] transition-all duration-200">
+					<span
+						class="min-h-[44px] w-full rounded-md border border-zinc-300 p-14 text-[0.9rem] text-zinc-400 transition-all duration-200"
+					>
 						（相手のメッセージがここに表示されます）
 					</span>
 				{/if}
 			</div>
 		</div>
 		<div class="flex flex-col gap-1.5">
-			<label for="user-input" class="text-[0.85rem] font-semibold text-zinc-600">自分のメッセージ</label>
+			<label for="user-input" class="text-[0.85rem] font-semibold text-zinc-600"
+				>自分のメッセージ</label
+			>
 			<input
 				id="user-input"
-				class="w-full p-14 border border-zinc-300 rounded-md text-base min-h-[44px] transition-all duration-200 outline-none focus:enabled:border-blue-600 disabled:bg-zinc-100 disabled:cursor-not-allowed"
+				class="min-h-[44px] w-full rounded-md border border-zinc-300 p-14 text-base transition-all duration-200 outline-none focus:enabled:border-blue-600 disabled:cursor-not-allowed disabled:bg-zinc-100"
 				type="text"
 				bind:value={inputText}
 				disabled={!isPaired}
