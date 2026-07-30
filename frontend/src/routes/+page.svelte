@@ -17,7 +17,6 @@
 	let socket: WebSocket | null = null; // 通信の本体
 	let inputText = $state('');
 	let logs = $state<LogItem[]>([]); // チャットの履歴
-	let logsContainer: HTMLDivElement | null = $state(null);
 	let partnerText = $state<string>('');
 	let lang: HTMLSelectElement | undefined = $state();
 	let waiting_count = $state(0);
@@ -139,25 +138,32 @@
 	});
 </script>
 
-<main class="container">
-	<header class="header">
-		<h2>Vanit WebSocket ペアリングチャット</h2>
-		<p class="subtitle">2つのブラウザウィンドウで「接続」するとペアリングが成立します</p>
+<main class="max-w-6xl mx-auto px-4 font-sans">
+	<header class="mb-6 text-center">
+		<h1 class="text-3xl font-bold mb-1 text-zinc-900">Vanit</h1>
 
 		<div>
-			<ol>
+			<ul class="flex justify-center gap-6 text-sm text-zinc-600">
 				<li>待機中: {waiting_count}人</li>
 				<li>接続済み: {matched_count}人</li>
 				<li>総ユーザー数: {waiting_count + matched_count}人</li>
-			</ol>
+			</ul>
 		</div>
 	</header>
 
 	<!-- ステータスバー -->
-	<div class="card status-card">
-		<div class="status-info">
-			<span class="dot {status}"></span>
-			<span class="status-label">
+	<div class="bg-white border border-zinc-200 rounded-2xl p-4 mb-4 shadow-sm flex justify-between items-center">
+		<div class="flex items-center gap-2.5 font-semibold">
+			<span
+				class="w-3 h-3 rounded-full transition-colors duration-200 {status === 'paired'
+					? 'bg-green-700 shadow-[0_0_6px_rgba(46,125,50,0.5)]'
+					: status === 'waiting'
+						? 'bg-amber-600'
+						: status === 'connecting'
+							? 'bg-sky-600'
+							: 'bg-red-600'}"
+			></span>
+			<span class="text-zinc-800">
 				{#if status === 'paired'}
 					ペアリング完了 (相互通信中)
 				{:else if status === 'waiting'}
@@ -170,7 +176,7 @@
 			</span>
 		</div>
 
-		<select bind:this={lang}>
+		<select bind:this={lang} class="border border-zinc-300 rounded-md px-3 py-1.5 text-sm bg-white text-zinc-800 outline-none focus:border-blue-600 cursor-pointer">
 			<option value="ja">Japanese</option>
 			<option value="en">English</option>
 			<option value="zh">Chinese</option>
@@ -188,38 +194,52 @@
 			<option value="arz">Egyptian Arabic</option>
 		</select>
 
-		<div class="actions">
+		<div>
 			{#if status === 'disconnected'}
-				<button class="btn primary" onclick={connect}>接続する</button>
+				<button
+					class="px-5 py-2.5 rounded-md font-semibold text-[0.95rem] text-white bg-blue-600 hover:enabled:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200 cursor-pointer"
+					onclick={connect}
+				>
+					接続する
+				</button>
 			{:else}
-				<button class="btn danger" onclick={disconnect}>切断する</button>
+				<button
+					class="px-5 py-2.5 rounded-md font-semibold text-[0.95rem] text-white bg-red-600 hover:enabled:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200 cursor-pointer"
+					onclick={disconnect}
+				>
+					切断する
+				</button>
 			{/if}
 		</div>
 	</div>
 
 	{#if status === 'waiting'}
-		<div class="banner warning">
+		<div class="px-4 py-3 rounded-lg text-[0.9rem] mb-4 bg-amber-50 border border-amber-300 text-amber-800">
 			⏳ 相手の接続を待っています。別のタブまたはウィンドウで開いて「接続する」を押してください。
 		</div>
 	{/if}
 
 	<!-- やりとり表示 -->
-	<div class="card exchange-card">
-		<div class="exchange-box">
-			<span class="box-label">相手のメッセージ</span>
-			<div class="text-display">
+	<div class="bg-white border border-zinc-200 rounded-2xl p-4 mb-4 shadow-sm flex flex-col gap-5">
+		<div class="flex flex-col gap-1.5">
+			<span class="text-[0.85rem] font-semibold text-zinc-600">相手のメッセージ</span>
+			<div class="bg-zinc-50 text-zinc-900 flex items-center break-all rounded-md">
 				{#if partnerText}
-					<span class="message">{partnerText}</span>
+					<span class="w-full p-14 border border-zinc-300 rounded-md text-base min-h-[44px] transition-all duration-200">
+						{partnerText}
+					</span>
 				{:else}
-					<span class="placeholder message">（相手のメッセージがここに表示されます）</span>
+					<span class="w-full p-14 border border-zinc-300 rounded-md text-[0.9rem] text-zinc-400 min-h-[44px] transition-all duration-200">
+						（相手のメッセージがここに表示されます）
+					</span>
 				{/if}
 			</div>
 		</div>
-		<div class="exchange-box">
-			<label for="user-input" class="box-label">自分のメッセージ</label>
+		<div class="flex flex-col gap-1.5">
+			<label for="user-input" class="text-[0.85rem] font-semibold text-zinc-600">自分のメッセージ</label>
 			<input
 				id="user-input"
-				class="message"
+				class="w-full p-14 border border-zinc-300 rounded-md text-base min-h-[44px] transition-all duration-200 outline-none focus:enabled:border-blue-600 disabled:bg-zinc-100 disabled:cursor-not-allowed"
 				type="text"
 				bind:value={inputText}
 				disabled={!isPaired}
@@ -233,270 +253,3 @@
 		</div>
 	</div>
 </main>
-
-<style>
-	.container {
-		max-width: 640px;
-		margin: 2rem auto;
-		padding: 0 1rem;
-		font-family:
-			system-ui,
-			-apple-system,
-			BlinkMacSystemFont,
-			'Segoe UI',
-			Roboto,
-			sans-serif;
-	}
-
-	.header {
-		margin-bottom: 1.5rem;
-		text-align: center;
-	}
-
-	.header h2 {
-		margin: 0 0 0.25rem 0;
-		color: #1a1a1a;
-	}
-
-	.subtitle {
-		margin: 0;
-		font-size: 0.9rem;
-		color: #666;
-	}
-
-	.card {
-		background: #ffffff;
-		border: 1px solid #e0e0e0;
-		border-radius: 10px;
-		padding: 1rem;
-		margin-bottom: 1rem;
-		box-shadow: 0 2px 4px rgba(0, 0, 0, 0.04);
-	}
-
-	.status-card {
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-	}
-
-	.status-info {
-		display: flex;
-		align-items: center;
-		gap: 0.6rem;
-		font-weight: 600;
-	}
-
-	.dot {
-		width: 12px;
-		height: 12px;
-		border-radius: 50%;
-		background-color: #9e9e9e;
-	}
-	.dot.paired {
-		background-color: #2e7d32;
-		box-shadow: 0 0 6px rgba(46, 125, 50, 0.5);
-	}
-	.dot.waiting {
-		background-color: #ed6c02;
-		animation: pulse 1.5s infinite;
-	}
-	.dot.connecting {
-		background-color: #0288d1;
-	}
-	.dot.disconnected {
-		background-color: #d32f2f;
-	}
-
-	@keyframes pulse {
-		0% {
-			opacity: 1;
-		}
-		50% {
-			opacity: 0.4;
-		}
-		100% {
-			opacity: 1;
-		}
-	}
-
-	.banner {
-		padding: 0.75rem 1rem;
-		border-radius: 8px;
-		font-size: 0.9rem;
-		margin-bottom: 1rem;
-	}
-	.banner.warning {
-		background-color: #fff8e1;
-		border: 1px solid #ffe082;
-		color: #b78103;
-	}
-
-	.exchange-card {
-		display: flex;
-		flex-direction: column;
-		gap: 1.25rem;
-	}
-
-	.exchange-box {
-		display: flex;
-		flex-direction: column;
-		gap: 0.4rem;
-	}
-
-	.message {
-		width: 100%;
-		box-sizing: border-box;
-		padding: 3.5rem;
-		border: 1px solid #ccc;
-		border-radius: 6px;
-		font-size: 1rem;
-		min-height: 44px;
-		transition:
-			border-color 0.2s,
-			box-shadow 0.2s;
-	}
-
-	.box-label {
-		font-size: 0.85rem;
-		font-weight: 600;
-		color: #555;
-	}
-
-	.text-display {
-		background-color: #f9f9f9;
-		color: #1a1a1a;
-		display: flex;
-		align-items: center;
-		word-break: break-all;
-	}
-
-	.placeholder {
-		color: #9e9e9e;
-		font-size: 0.9rem;
-	}
-
-	input.message {
-		flex: 1;
-		outline: none;
-	}
-	input.message:focus:not(:disabled) {
-		border-color: #1976d2;
-	}
-	input[type='text']:disabled {
-		background-color: #f5f5f5;
-		cursor: not-allowed;
-	}
-
-	.btn {
-		padding: 0.6rem 1.2rem;
-		border: none;
-		border-radius: 6px;
-		font-weight: 600;
-		font-size: 0.95rem;
-		cursor: pointer;
-		transition:
-			background-color 0.2s,
-			opacity 0.2s;
-	}
-	.btn:disabled {
-		opacity: 0.5;
-		cursor: not-allowed;
-	}
-	.btn.primary {
-		background-color: #1976d2;
-		color: #ffffff;
-	}
-	.btn.primary:hover:not(:disabled) {
-		background-color: #1565c0;
-	}
-	.btn.danger {
-		background-color: #d32f2f;
-		color: #ffffff;
-	}
-	.btn.danger:hover:not(:disabled) {
-		background-color: #c62828;
-	}
-	.btn.text-btn {
-		background: transparent;
-		color: #666;
-		padding: 0.2rem 0.5rem;
-		font-size: 0.85rem;
-	}
-	.btn.text-btn:hover {
-		color: #111;
-	}
-
-	.logs-card {
-		display: flex;
-		flex-direction: column;
-	}
-
-	.logs-header {
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-		margin-bottom: 0.5rem;
-	}
-
-	.logs {
-		height: 300px;
-		overflow-y: auto;
-		background: #fafafa;
-		border: 1px solid #e0e0e0;
-		border-radius: 6px;
-		padding: 0.75rem;
-		display: flex;
-		flex-direction: column;
-		gap: 0.5rem;
-	}
-
-	.log-item {
-		display: flex;
-		justify-content: space-between;
-		align-items: flex-start;
-		padding: 0.5rem 0.75rem;
-		border-radius: 6px;
-		font-size: 0.9rem;
-		line-height: 1.4;
-	}
-
-	.log-content {
-		display: flex;
-		gap: 0.4rem;
-		word-break: break-word;
-	}
-
-	.sender-tag {
-		font-weight: bold;
-		user-select: none;
-	}
-
-	.time {
-		font-size: 0.75rem;
-		color: #888;
-		margin-left: 0.5rem;
-		white-space: nowrap;
-	}
-
-	.log-item.system {
-		background-color: #eee;
-		color: #555;
-		font-style: italic;
-		justify-content: center;
-	}
-
-	.log-item.sent {
-		background-color: #e3f2fd;
-		color: #0d47a1;
-	}
-	.log-item.received {
-		background-color: #e8f5e9;
-		color: #1b5e20;
-	}
-
-	.empty {
-		color: #9e9e9e;
-		text-align: center;
-		margin: auto;
-	}
-</style>
