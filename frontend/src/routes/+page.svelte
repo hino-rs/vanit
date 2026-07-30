@@ -2,6 +2,18 @@
 	import { onDestroy } from 'svelte';
 	import { onMount } from 'svelte';
 
+	onMount(() => {
+		// 描画前に初期テーマを適用
+		const saved = localStorage.getItem('theme') || 'dark';
+		if (saved === 'system') {
+			const isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+			document.documentElement.setAttribute('data-theme', isDark ? 'dark' : 'light');
+		} else {
+			document.documentElement.setAttribute('data-theme', saved);
+		}
+	});
+
+	type Theme = 'dark' | 'light' | 'system';
 	type ConnectionStatus = 'disconnected' | 'connecting' | 'waiting' | 'paired';
 	type LogType = 'sent' | 'received' | 'system';
 
@@ -12,6 +24,7 @@
 		time: string;
 	}
 
+	let theme = $state<Theme>('dark');
 	let status = $state<ConnectionStatus>('disconnected'); // 現在の通信状態
 	let isPaired = $state(false); // ペアリング済みかどうか
 	let socket: WebSocket | null = null; // 通信の本体
@@ -21,6 +34,41 @@
 	let lang: HTMLSelectElement | undefined = $state();
 	let waiting_count = $state(0);
 	let matched_count = $state(0);
+	let languageNotSelected = $state(false);
+
+	function applyTheme(targetTheme: Theme) {
+		const root = document.documentElement;
+		if (targetTheme === 'system') {
+			const systemIsDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+			root.setAttribute('data-theme', systemIsDark ? 'dark' : 'light');
+		} else {
+			root.setAttribute('data-theme', targetTheme);
+		}
+	}
+
+	function changeTheme(newTheme: Theme) {
+		theme = newTheme;
+		localStorage.setItem('theme', newTheme);
+		applyTheme(newTheme);
+	}
+
+	onMount(() => {
+		const savedTheme = (localStorage.getItem('theme') as Theme) || 'dark';
+		theme = savedTheme;
+		applyTheme(savedTheme);
+
+		// OSのテーマ変更を監視
+		const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+		const handleSystemChange = () => {
+			if (theme === 'system') {
+				applyTheme('system');
+			}
+		};
+
+		mediaQuery.addEventListener('change', handleSystemChange);
+
+		return () => mediaQuery.removeEventListener('change', handleSystemChange);
+	});
 
 	async function fetchPeopleCount() {
 		try {
@@ -59,6 +107,12 @@
 
 	function connect() {
 		if (socket) return;
+		if (lang && lang.value === 'not-selected') {
+			languageNotSelected = true;
+			return;
+		} else {
+			languageNotSelected = false;
+		}
 
 		status = 'connecting';
 		isPaired = false;
@@ -119,18 +173,7 @@
 		if (!isPaired || !socket) return;
 		const messageToSend = inputText.trim();
 		socket.send(messageToSend); // サーバーへ送信
-		addLog(messageToSend, 'sent'); // 自分の画面には「自分:」として表示
-		// inputText = '';
-	}
-
-	function handleKeydown(e: KeyboardEvent) {
-		if (e.key === 'Enter' && !e.isComposing) {
-			sendMessage();
-		}
-	}
-
-	function clearLogs() {
-		logs = [];
+		addLog(messageToSend, 'sent');
 	}
 
 	onDestroy(() => {
@@ -139,12 +182,21 @@
 </script>
 
 <main class="mx-auto max-w-6xl px-4 font-sans">
-	<header class="text-center border-b mt-3 border-zinc-400">
-		<h1 class="mb-1 text-3xl font-bold text-zinc-900">Vanit</h1>
+	<header class="mt-3 flex border-b border-zinc-400">
+		<h1 class="m-auto mb-1 text-3xl font-bold text-base-content">Vanit</h1>
+		<select
+			value={theme}
+			onchange={(e) => changeTheme(e.currentTarget.value as Theme)}
+			class="select m-auto w-32 select-ghost"
+		>
+			<option value="light">☀️Lignt</option>
+			<option value="dark">🌙Dark</option>
+			<option value="system">💻System</option>
+		</select>
 	</header>
-	
+
 	<div>
-		<ul class="flex justify-center gap-6 text-sm text-zinc-600 mt-10">
+		<ul class="mt-10 flex justify-center gap-6 text-sm text-base-content">
 			<li>待機中: {waiting_count}人</li>
 			<li>接続済み: {matched_count}人</li>
 			<li>総ユーザー数: {waiting_count + matched_count}人</li>
@@ -153,7 +205,7 @@
 
 	<!-- ステータスバー -->
 	<div
-		class="mb-4 flex items-center justify-between rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm"
+		class="mb-4 flex min-h-24 items-center justify-between rounded-2xl border border-zinc-200 bg-base-100 p-4 shadow-sm"
 	>
 		<div class="flex items-center gap-2.5 font-semibold">
 			<span
@@ -165,7 +217,7 @@
 							? 'bg-sky-600'
 							: 'bg-red-600'}"
 			></span>
-			<span class="text-zinc-800">
+			<span class="min-w-64 text-base-content">
 				{#if status === 'paired'}
 					ペアリング完了 (相互通信中)
 				{:else if status === 'waiting'}
@@ -178,9 +230,15 @@
 			</span>
 		</div>
 
+		{#if languageNotSelected}
+			<div role="alert" class="alert alert-warning">
+				<span>Please select a language</span>
+			</div>
+		{/if}
+
 		<select
 			bind:this={lang}
-			class="select cursor-pointer rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-sm text-zinc-800 outline-none focus:border-blue-600"
+			class="select cursor-pointer rounded-md border border-zinc-300 bg-base-100 px-3 py-1.5 text-sm text-base-content outline-none focus:border-blue-600"
 		>
 			<option disabled selected value="not-selected">Select your language</option>
 			<option value="ja">Japanese</option>
@@ -200,38 +258,27 @@
 			<option value="arz">Egyptian Arabic</option>
 		</select>
 
-		<div>
+		<div class="flex min-w-64 justify-end">
 			{#if status === 'disconnected'}
-				<button
-					class="btn btn-outline btn-info"
-					onclick={connect}
-				>
-					接続する
-				</button>
+				<button class="btn btn-outline btn-info" onclick={connect}> 接続する </button>
 			{:else}
-				<button
-					class="btn btn-outline btn-secondary"
-					onclick={disconnect}
-				>
+				<button class="btn btn-outline btn-secondary" onclick={disconnect}>
+					{#if status === 'waiting'}
+						<span class="loading loading-sm loading-dots"></span>
+					{/if}
 					切断する
 				</button>
 			{/if}
 		</div>
 	</div>
 
-	{#if status === 'waiting'}
-		<div
-			class="mb-4 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-[0.9rem] text-amber-800"
-		>
-			⏳ 相手の接続を待っています。別のタブまたはウィンドウで開いて「接続する」を押してください。
-		</div>
-	{/if}
-
 	<!-- やりとり表示 -->
-	<div class="mb-4 flex flex-col gap-5 rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
+	<div
+		class="mb-4 flex flex-col gap-5 rounded-2xl border border-zinc-200 bg-base-100 p-4 shadow-sm"
+	>
 		<div class="flex flex-col gap-1.5">
-			<span class="text-[0.85rem] font-semibold text-zinc-600">相手のメッセージ</span>
-			<div class="flex items-center rounded-md bg-zinc-50 break-all text-zinc-900">
+			<span class="text-[0.85rem] font-semibold text-base-content">相手のメッセージ</span>
+			<div class="flex items-center rounded-md bg-base-200 break-all text-base-content">
 				{#if partnerText}
 					<span
 						class="min-h-[44px] w-full rounded-md border border-zinc-300 p-14 text-base transition-all duration-200"
@@ -240,7 +287,7 @@
 					</span>
 				{:else}
 					<span
-						class="min-h-[44px] w-full rounded-md border border-zinc-300 p-14 text-[0.9rem] text-zinc-400 transition-all duration-200"
+						class="min-h-[44px] w-full rounded-md border border-zinc-300 p-14 text-[0.9rem] text-base-content transition-all duration-200"
 					>
 						（相手のメッセージがここに表示されます）
 					</span>
@@ -248,12 +295,12 @@
 			</div>
 		</div>
 		<div class="flex flex-col gap-1.5">
-			<label for="user-input" class="text-[0.85rem] font-semibold text-zinc-600"
+			<label for="user-input" class="text-[0.85rem] font-semibold text-base-content"
 				>自分のメッセージ</label
 			>
 			<input
 				id="user-input"
-				class="min-h-[44px] w-full rounded-md border border-zinc-300 p-14 text-base transition-all duration-200 outline-none focus:enabled:border-blue-600 disabled:cursor-not-allowed disabled:bg-zinc-100"
+				class="min-h-[44px] w-full rounded-md border border-zinc-300 p-14 text-base transition-all duration-200 outline-none focus:enabled:border-blue-600 disabled:cursor-not-allowed disabled:bg-base-200"
 				type="text"
 				bind:value={inputText}
 				disabled={!isPaired}
