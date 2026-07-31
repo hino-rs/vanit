@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onDestroy, onMount } from 'svelte';
 	import { CREDITS_DATA } from '$lib/data/credits';
+	import { STORAGE_KEYS } from '$lib/constants/storage';
 
 	let creditSearch = $state('');
 	let creditCategory = $state<'all' | 'frontend' | 'backend'>('all');
@@ -20,7 +21,7 @@
 
 	onMount(() => {
 		// 描画前に初期テーマを適用
-		const saved = localStorage.getItem('theme') || 'dark';
+		const saved = localStorage.getItem(STORAGE_KEYS.THEME) || 'dark';
 		if (saved === 'system') {
 			const isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
 			document.documentElement.setAttribute('data-theme', isDark ? 'dark' : 'light');
@@ -32,11 +33,18 @@
 	let eligibilityModal: HTMLDialogElement;
 	onMount(async () => {
 		// 年齢制限・利用資格の確認
-		const eligibility = localStorage.getItem('eligibility') || 'unconfirmed';
+		const eligibility = localStorage.getItem(STORAGE_KEYS.ELIGIBILITY) || 'unconfirmed';
 		if (eligibility !== 'confirmed') {
 			await waitForModalClose(eligibilityModal);
 		}
-		localStorage.setItem('eligibility', 'confirmed');
+		localStorage.setItem(STORAGE_KEYS.ELIGIBILITY, 'confirmed');
+	});
+
+	onMount(() => {
+		const hasConnected = localStorage.getItem(STORAGE_KEYS.HAS_CONNECTED);
+		if (hasConnected === 'true') {
+			isFirstConnect = false;
+		}
 	});
 
 	type Theme = 'dark' | 'light' | 'system';
@@ -50,11 +58,11 @@
 		time: string;
 	}
 
+	let isFirstConnect = $state(true);
 	let creditModal: HTMLDialogElement;
 	let privacyPolicyModal: HTMLDialogElement;
 	let structureNoteModal: HTMLDialogElement;
 	let termsOfServiceModal: HTMLDialogElement;
-	let isFirstConnect = $state(true);
 	let theme = $state<Theme>('dark');
 	let status = $state<ConnectionStatus>('disconnected'); // 現在の通信状態
 	let isPaired = $state(false); // ペアリング済みかどうか
@@ -79,12 +87,12 @@
 
 	function changeTheme(newTheme: Theme) {
 		theme = newTheme;
-		localStorage.setItem('theme', newTheme);
+		localStorage.setItem(STORAGE_KEYS.THEME, newTheme);
 		applyTheme(newTheme);
 	}
 
 	onMount(() => {
-		const savedTheme = (localStorage.getItem('theme') as Theme) || 'dark';
+		const savedTheme = (localStorage.getItem(STORAGE_KEYS.THEME) as Theme) || 'dark';
 		theme = savedTheme;
 		applyTheme(savedTheme);
 
@@ -154,6 +162,7 @@
 		if (isFirstConnect) {
 			await waitForModalClose(structureNoteModal);
 			isFirstConnect = false;
+			localStorage.setItem(STORAGE_KEYS.HAS_CONNECTED, 'true');
 		}
 
 		status = 'connecting';
@@ -432,7 +441,6 @@
 		<button>close</button>
 	</form>
 </dialog>
-
 
 <!-- 利用規約 -->
 <dialog bind:this={termsOfServiceModal} class="modal">
