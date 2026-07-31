@@ -13,6 +13,16 @@
 		}
 	});
 
+	let eligibilityModal: HTMLDialogElement;
+	onMount(async () => {
+		// 年齢制限・利用資格の確認
+		const eligibility = localStorage.getItem('eligibility') || 'unconfirmed';
+		if (eligibility !== 'confirmed') {
+			await waitForModalClose(eligibilityModal);
+		}
+		localStorage.setItem('eligibility', 'confirmed');
+	});
+
 	type Theme = 'dark' | 'light' | 'system';
 	type ConnectionStatus = 'disconnected' | 'connecting' | 'waiting' | 'paired';
 	type LogType = 'sent' | 'received' | 'system';
@@ -24,6 +34,9 @@
 		time: string;
 	}
 
+	let structureNoteModal: HTMLDialogElement;
+	let termsOfServiceModal: HTMLDialogElement;
+	let isFirstConnect = $state(true);
 	let theme = $state<Theme>('dark');
 	let status = $state<ConnectionStatus>('disconnected'); // 現在の通信状態
 	let isPaired = $state(false); // ペアリング済みかどうか
@@ -121,10 +134,10 @@
 			languageNotSelected = false;
 		}
 		if (isFirstConnect) {
-			await waitForModalClose(modal);
+			await waitForModalClose(structureNoteModal);
 			isFirstConnect = false;
 		}
-		
+
 		status = 'connecting';
 		isPaired = false;
 		addLog('WebSocket サーバー (ws://127.0.0.1:3000/ws) へ接続中...', 'system');
@@ -190,19 +203,56 @@
 	onDestroy(() => {
 		disconnect();
 	});
-
-	let modal: HTMLDialogElement;
-	let isFirstConnect = $state(true);
 </script>
 
-<dialog bind:this={modal} class="modal modal-bottom sm:modal-middle">
-  <div class="modal-box">
-    <h3 class="text-lg font-bold">⚠️注意</h3>
-    <p class="py-4">送信ボタンを押す前の入力中テキストが相手に見えます。そのため、個人情報や機密情報の流出には十分気を付けてください。<strong>Vanitはその責任を一切取りません。</strong></p>
+<!-- 利用資格 -->
+<dialog bind:this={eligibilityModal} class="modal">
+	<div class="modal-box">
+		<h3 class="text-lg font-bold">利用資格の確認</h3>
+		<p class="py-4">
+			当アプリケーションは13歳未満の利用を禁止しています。また、未成年者の利用には保護者の同意が必要です。
+		</p>
+		<p class="py-4">
+			OKボタンを押すと、利用資格要件を満たしていることに同意したものとみなされます。要件を満たしていない場合は、このサイトを閉じてください。
+		</p>
+		<div class="modal-action">
+			<form method="dialog">
+				<button class="btn">OK</button>
+			</form>
+		</div>
+	</div>
+</dialog>
+
+<!-- テキストがリアルタイム送信されることの警告 -->
+<dialog bind:this={structureNoteModal} class="modal modal-bottom sm:modal-middle">
+	<div class="modal-box">
+		<h3 class="text-lg font-bold">⚠️注意</h3>
+		<p class="py-4">
+			送信ボタンを押す前の入力中テキストが相手に見えます。そのため、個人情報や機密情報の流出には十分気を付けてください。<strong
+				>Vanitはその責任を一切取りません。</strong
+			>
+		</p>
+		<div class="modal-action">
+			<form method="dialog">
+				<!-- if there is a button in form, it will close the modal -->
+				<button class="btn">OK</button>
+			</form>
+		</div>
+	</div>
+</dialog>
+
+<!-- 利用規約 -->
+<dialog bind:this={termsOfServiceModal} class="modal">
+  <div class="modal-box w-11/12 max-w-5xl">
+    <h2 class="text-lg font-bold">利用規約</h2>
+	<h3>禁止事項</h3>
+	<h3>免責事項</h3>
+	<h3>違反者への対応</h3>
+	
+    <p class="py-4"></p>
     <div class="modal-action">
       <form method="dialog">
-        <!-- if there is a button in form, it will close the modal -->
-        <button class="btn">OK</button>
+        <button class="btn">Close</button>
       </form>
     </div>
   </div>
@@ -210,7 +260,7 @@
 
 <main class="mx-auto max-w-6xl px-4 font-sans">
 	<header class="mt-3 flex border-b border-zinc-400">
-		<!-- <button class="btn" onclick={() => modal.showModal()}>open modal</button> -->
+		<button class="btn" onclick={() => waitForModalClose(termsOfServiceModal)}>利用規約</button>
 		<h1 class="m-auto mb-1 text-3xl font-bold text-base-content">Vanit</h1>
 		<select
 			value={theme}
