@@ -262,5 +262,5 @@ export const CREDITS_DATA: CreditItem[] = [
 		description: 'Modular component framework for async networking clients and servers.',
 		homepage: 'https://github.com/tower-rs/tower',
 		author: 'Tower Contributors'
-	}
+	},
 ];

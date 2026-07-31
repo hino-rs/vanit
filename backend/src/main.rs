@@ -4,6 +4,7 @@ use axum::{
         Query, State,
         ws::{Message, WebSocket, WebSocketUpgrade},
     },
+    http::StatusCode,
     response::IntoResponse,
     routing::get,
 };
@@ -13,6 +14,7 @@ use log::info;
 use serde::Deserialize;
 use serde_json::json;
 use std::{
+    collections::HashSet,
     net::SocketAddr,
     sync::{
         Arc,
@@ -27,6 +29,7 @@ type Tx = mpsc::UnboundedSender<String>;
 
 #[derive(Deserialize)]
 struct ConnectQuery {
+    user_id: Uuid,
     lang: String,
 }
 
@@ -93,6 +96,8 @@ struct PairManager {
     active_pairs: DashMap<Uuid, (Uuid, Tx)>,
     /// 接続済みユーザー数
     matched_count: AtomicU64,
+    /// ブロックリスト
+    blacklist: HashSet<Uuid>,
 }
 
 impl PairManager {
@@ -173,7 +178,12 @@ async fn main() -> Result<(), anyhow::Error> {
         .filter_level(log::LevelFilter::Info)
         .init();
     let cors = CorsLayer::permissive();
-    let state = Arc::new(AppState::default());
+    let mut app_state = AppState::default();
+    app_state
+        .pair_manager
+        .blacklist
+        .insert(Uuid::parse_str("11bf06b7-1622-4aa5-a0eb-d1f9727d7c19").unwrap());
+    let state = Arc::new(app_state);
 
     let app = Router::new()
         .route("/ws", get(ws_handler))
@@ -199,21 +209,51 @@ async fn ws_handler(
     State(state): State<Arc<AppState>>,
     Query(query): Query<ConnectQuery>,
     ws: WebSocketUpgrade,
-) -> impl IntoResponse {
-    ws.on_upgrade(move |socket| handle_socket(socket, state, Language::from_str(&query.lang)))
+) -> Result<impl IntoResponse, StatusCode> {
+    let is_blacklisted = state.pair_manager.blacklist.contains(&query.user_id);
+
+    Ok(ws.on_upgrade(move |socket| {
+        handle_socket(
+            socket,
+            state,
+            query.user_id,
+            Language::from_str(&query.lang),
+            is_blacklisted,
+        )
+    }))
 }
 
-async fn handle_socket(socket: WebSocket, state: Arc<AppState>, language: Language) {
-    let my_id = Uuid::new_v4();
+async fn handle_socket(
+    socket: WebSocket,
+    state: Arc<AppState>,
+    my_id: Uuid,
+    language: Language,
+    is_blacklisted: bool,
+) {
+    let (mut ws_sender, mut ws_receiver) = socket.split();
     // 自分の受信ボックスを作る
     let (my_tx, mut my_rx) = mpsc::unbounded_channel::<String>();
+
+    // ブラックリスト対象者をループに閉じ込める
+    if is_blacklisted {
+        loop {
+            tokio::select! {
+                ws_msg = ws_receiver.next() => {
+                    match ws_msg {
+                        Some(Ok(Message::Close(_))) | None => break,
+                        _ => {}
+                    }
+                }
+                _ = my_rx.recv() => {}
+            }
+        }
+        return;
+    }
 
     let user = User {
         tx: my_tx,
         language,
     };
-
-    let (mut ws_sender, mut ws_receiver) = socket.split();
 
     // === ペアリング処理 ===
     if let Some((_partner_id, partner_tx)) = state.pair_manager.register(my_id, user) {

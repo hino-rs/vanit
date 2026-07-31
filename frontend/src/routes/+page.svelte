@@ -3,6 +3,15 @@
 	import { CREDITS_DATA } from '$lib/data/credits';
 	import { STORAGE_KEYS } from '$lib/constants/storage';
 
+	function getOrCreateDeviceId(): string {
+		let id = localStorage.getItem(STORAGE_KEYS.DEVICE_ID);
+		if (!id) {
+			id = crypto.randomUUID();
+			localStorage.setItem(STORAGE_KEYS.DEVICE_ID, id);
+		}
+		return id
+	}
+
 	let creditSearch = $state('');
 	let creditCategory = $state<'all' | 'frontend' | 'backend'>('all');
 
@@ -58,6 +67,8 @@
 		time: string;
 	}
 
+
+	let userId: string = ""
 	let isFirstConnect = $state(true);
 	let creditModal: HTMLDialogElement;
 	let privacyPolicyModal: HTMLDialogElement;
@@ -74,6 +85,10 @@
 	let waiting_count = $state(0);
 	let matched_count = $state(0);
 	let languageNotSelected = $state(false);
+
+	onMount(() => {
+		userId = getOrCreateDeviceId();
+	});
 
 	function applyTheme(targetTheme: Theme) {
 		const root = document.documentElement;
@@ -169,7 +184,9 @@
 		isPaired = false;
 		addLog('WebSocket サーバー (ws://127.0.0.1:3000/ws) へ接続中...', 'system');
 
-		socket = new WebSocket(`ws://127.0.0.1:3000/ws?lang=${lang ? lang.value : 'en'}`);
+		const wsUrl = `http://127.0.0.1:3000/ws?user_id=${userId}&lang=${lang}`;
+
+		socket = new WebSocket(wsUrl);
 
 		socket.onopen = () => {
 			status = 'waiting';
