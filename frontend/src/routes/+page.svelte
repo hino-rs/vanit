@@ -105,7 +105,14 @@
 	//   }
 	// });
 
-	function connect() {
+	function waitForModalClose(dialogElement: HTMLDialogElement): Promise<void> {
+		return new Promise((resolve) => {
+			dialogElement.addEventListener('close', () => resolve(), { once: true });
+			dialogElement.showModal();
+		});
+	}
+
+	async function connect() {
 		if (socket) return;
 		if (lang && lang.value === 'not-selected') {
 			languageNotSelected = true;
@@ -113,7 +120,11 @@
 		} else {
 			languageNotSelected = false;
 		}
-
+		if (isFirstConnect) {
+			await waitForModalClose(modal);
+			isFirstConnect = false;
+		}
+		
 		status = 'connecting';
 		isPaired = false;
 		addLog('WebSocket サーバー (ws://127.0.0.1:3000/ws) へ接続中...', 'system');
@@ -179,10 +190,27 @@
 	onDestroy(() => {
 		disconnect();
 	});
+
+	let modal: HTMLDialogElement;
+	let isFirstConnect = $state(true);
 </script>
+
+<dialog bind:this={modal} class="modal modal-bottom sm:modal-middle">
+  <div class="modal-box">
+    <h3 class="text-lg font-bold">⚠️注意</h3>
+    <p class="py-4">送信ボタンを押す前の入力中テキストが相手に見えます。そのため、個人情報や機密情報の流出には十分気を付けてください。<strong>Vanitはその責任を一切取りません。</strong></p>
+    <div class="modal-action">
+      <form method="dialog">
+        <!-- if there is a button in form, it will close the modal -->
+        <button class="btn">OK</button>
+      </form>
+    </div>
+  </div>
+</dialog>
 
 <main class="mx-auto max-w-6xl px-4 font-sans">
 	<header class="mt-3 flex border-b border-zinc-400">
+		<!-- <button class="btn" onclick={() => modal.showModal()}>open modal</button> -->
 		<h1 class="m-auto mb-1 text-3xl font-bold text-base-content">Vanit</h1>
 		<select
 			value={theme}
