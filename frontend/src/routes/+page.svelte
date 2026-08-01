@@ -2,6 +2,7 @@
 	import { onDestroy, onMount } from 'svelte';
 	import { CREDITS_DATA } from '$lib/data/credits';
 	import { STORAGE_KEYS } from '$lib/constants/storage';
+	import * as Types from '$lib/types';
 
 	function getOrCreateDeviceId(): string {
 		let id = localStorage.getItem(STORAGE_KEYS.DEVICE_ID);
@@ -240,8 +241,22 @@
 	function sendMessage() {
 		if (!isPaired || !socket) return;
 		const messageToSend = inputText.trim();
-		socket.send(messageToSend); // サーバーへ送信
+		let data: Types.Message = {
+			type: "chat",
+			content: messageToSend,
+		}
+		socket.send(JSON.stringify(data)); // サーバーへ送信
 		addLog(messageToSend, 'sent');
+	}
+
+	function report_partner() {
+		if (!isPaired || !socket) return;
+		let data: Types.ReportRequest = {
+			target_user_id: "aaabbb", 
+			reason: "harassment", 
+			detail: "うぜえ",
+		}
+		socket.send(JSON.stringify(data));
 	}
 
 	onDestroy(() => {
@@ -614,7 +629,10 @@
 		class="mb-4 flex flex-col gap-5 rounded-2xl border border-zinc-200 bg-base-100 p-4 shadow-sm"
 	>
 		<div class="flex flex-col gap-1.5">
-			<span class="text-[0.85rem] font-semibold text-base-content">相手のメッセージ</span>
+			<div class="">
+				<span class="text-[0.85rem] font-semibold text-base-content">相手のメッセージ</span>
+				<button class="btn ml-4" onclick={() => { report_partner() }}>通報する</button>
+			</div>
 			<div class="flex items-center rounded-md bg-base-200 break-all text-base-content">
 				{#if partnerText}
 					<span

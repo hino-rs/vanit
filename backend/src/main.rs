@@ -1,3 +1,6 @@
+mod schema;
+use schema::*;
+
 use axum::{
     Json, Router,
     extract::{
@@ -117,7 +120,6 @@ impl PairManager {
         {
             self.matched_count.fetch_add(2, Ordering::Relaxed);
             if partner_data.language == my_data.language {
-                info!("ペア成立: {:?}", partner_data.language);
                 // 双方向にactive_pairsへ登録
                 self.active_pairs
                     .insert(my_id, (partner_id, partner_data.tx.clone()));
@@ -178,11 +180,8 @@ async fn main() -> Result<(), anyhow::Error> {
         .filter_level(log::LevelFilter::Info)
         .init();
     let cors = CorsLayer::permissive();
-    let mut app_state = AppState::default();
-    app_state
-        .pair_manager
-        .blacklist
-        .insert(Uuid::parse_str("11bf06b7-1622-4aa5-a0eb-d1f9727d7c19").unwrap());
+
+    let app_state = AppState::default();
     let state = Arc::new(app_state);
 
     let app = Router::new()
@@ -203,6 +202,13 @@ async fn main() -> Result<(), anyhow::Error> {
 async fn get_people_count(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     let (matched, waiting) = state.pair_manager.count_data().await;
     Json(json!({ "matched": matched, "waiting": waiting }))
+}
+
+async fn report(
+    State(state): State<Arc<AppState>>,
+    Json(request): Json<ReportRequest>,
+) -> impl IntoResponse {
+    // TODO
 }
 
 async fn ws_handler(
@@ -269,12 +275,30 @@ async fn handle_socket(
     loop {
         tokio::select! {
             // パートナーまたはシステムからメッセージが届いたとき
-            some_msg = my_rx.recv() => {
-                match some_msg {
-                    Some(msg) => {
-                        // 自分のWebSocketへ送信
-                        if ws_sender.send(Message::Text(msg.into())).await.is_err() {
-                            break;
+            some_data = my_rx.recv() => {
+                match some_data {
+                    Some(data) => {
+                        match serde_json::from_str::<schema::Message>(&data) {
+                            Ok(schema::Message::Chat { content }) => {
+                                // 自分のWebSocketへ送信
+                                if ws_sender.send(Message::Text(content.into())).await.is_err() {
+                                    break;
+                                }
+                            }
+                            Ok(schema::Message::System { event, message }) => {
+                                match event {
+                                    schema::SystemEvent::PartnerDisconnected => {
+                                        println!("{message}");
+                                        break;
+                                    }
+                                    schema::SystemEvent::MatchingCompleted => {
+                                        println!("{message}");
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                eprintln!("{e}");
+                            }
                         }
                     }
                     None => {
