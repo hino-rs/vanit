@@ -3,4 +3,4 @@
 /**
  * システムイベントの種類
  */
-export type SystemEvent = { "type": "partner_disconnected" } | { "type": "matching_completed" };
+export type SystemEvent = { "type": "partner_disconnected" } | { "type": "matching_completed", partner_id: string, } | { "type": "failed_to_send_message" };

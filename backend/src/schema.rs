@@ -1,9 +1,9 @@
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 use uuid::Uuid;
 
 /// タグ付きメッセージ種別
-#[derive(Debug, Clone, Deserialize, PartialEq, TS)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, TS)]
 #[ts(export, export_to = "../../frontend/src/lib/types/")]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Message {
@@ -12,12 +12,13 @@ pub enum Message {
 }
 
 /// システムイベントの種類
-#[derive(Debug, Clone, Deserialize, PartialEq, TS)]
+#[derive(Debug, Clone, Deserialize, PartialEq, TS, Serialize)]
 #[ts(export, export_to = "../../frontend/src/lib/types/")]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum SystemEvent {
     PartnerDisconnected,
-    MatchingCompleted,
+    MatchingCompleted { partner_id: Uuid },
+    FailedToSendMessage,
 }
 
 /// 通報リクエスト
@@ -35,8 +36,23 @@ pub struct ReportRequest {
 #[ts(export, export_to = "../../frontend/src/lib/types/")]
 #[serde(rename_all = "snake_case")]
 pub enum ReportReason {
+    /// 不適切な発言
     InappropriateLanguage,
+    /// スパム
     Spam,
+    /// 嫌がらせ
     Harassment,
+    /// その他
     Other,
+}
+
+impl ReportReason {
+    pub fn penalty(&self) -> u32 {
+        match self {
+            ReportReason::InappropriateLanguage => 4,
+            ReportReason::Spam => 12,
+            ReportReason::Harassment => 8,
+            ReportReason::Other => 2,
+        }
+    }
 }

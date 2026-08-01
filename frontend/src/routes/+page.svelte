@@ -127,7 +127,7 @@
 
 	async function fetchPeopleCount() {
 		try {
-			const res = await fetch('http://localhost:3000/get_people_count');
+			const res = await fetch('http://localhost:3000/api/get_people_count');
 			let data = await res.json();
 			waiting_count = data['waiting'];
 			matched_count = data['matched'];
@@ -185,7 +185,7 @@
 		isPaired = false;
 		addLog('WebSocket サーバー (ws://127.0.0.1:3000/ws) へ接続中...', 'system');
 
-		const wsUrl = `http://127.0.0.1:3000/ws?user_id=${userId}&lang=${lang}`;
+		const wsUrl = `ws://127.0.0.1:3000/ws?user_id=${userId}&lang=${lang?.value}`;
 
 		socket = new WebSocket(wsUrl);
 
@@ -194,27 +194,44 @@
 			addLog('サーバーへの接続に成功しました。ペアリング待機中...', 'system');
 		};
 
-		socket.onmessage = (event: MessageEvent<string>) => {
-			const data = event.data;
-
-			if (data === 'ペアリングが完了しました！') {
-				// サーバー側で2人がマッチングしたとき
-				status = 'paired';
-				isPaired = true;
-				addLog('ペアリングが完了しました。相手との相互通信を開始できます。', 'system');
-			} else if (data === 'パートナーが切断しました。') {
-				// 相手がブラウザを閉じたとき
-				isPaired = false;
-				status = 'disconnected';
-				addLog('⚠️ パートナーが切断しました。', 'system');
-				disconnect();
-			} else if (data === 'パートナーへの送信に失敗しました。') {
-				addLog('⚠️ パートナーへのメッセージ送信に失敗しました。', 'system');
-			} else {
-				// それ以外の文字列は相手からのチャットメッセージ
-				addLog(data, 'received');
-				partnerText = data;
+		socket.onmessage = (event: MessageEvent) => {
+			try {
+				const data: Types.Message = JSON.parse(event.data);
+				console.log(data);
+				if (data.type === 'system' && data.event.type === 'matching_completed') {
+					status = 'paired';
+					isPaired = true;
+				} else if (data.type === 'system' && data.event.type === 'partner_disconnected') {
+					isPaired = false;
+					status = 'disconnected';
+					disconnect();
+				} else if (data.type === 'system' && data.event.type === 'failed_to_send_message') {
+					console.log("メッセージの送信に失敗");
+				} else if (data.type === 'chat') {
+					partnerText = data.content;
+				}
+			} catch (err) {
+				console.error('メッセージのパースに失敗:', err);
 			}
+
+			// if (data === 'ペアリングが完了しました！') {
+			// 	// サーバー側で2人がマッチングしたとき
+			// 	status = 'paired';
+			// 	isPaired = true;
+			// 	addLog('ペアリングが完了しました。相手との相互通信を開始できます。', 'system');
+			// } else if (data === 'パートナーが切断しました。') {
+			// 	// 相手がブラウザを閉じたとき
+			// 	isPaired = false;
+			// 	status = 'disconnected';
+			// 	addLog('⚠️ パートナーが切断しました。', 'system');
+			// 	disconnect();
+			// } else if (data === 'パートナーへの送信に失敗しました。') {
+			// 	addLog('⚠️ パートナーへのメッセージ送信に失敗しました。', 'system');
+			// } else {
+			// 	// それ以外の文字列は相手からのチャットメッセージ
+			// 	addLog(data, 'received');
+			// 	partnerText = data;
+			// }
 		};
 
 		socket.onerror = () => {

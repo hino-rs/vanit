@@ -9,7 +9,7 @@ use axum::{
     },
     http::StatusCode,
     response::IntoResponse,
-    routing::get,
+    routing::{get, post},
 };
 use dashmap::DashMap;
 use futures::{SinkExt, StreamExt};
@@ -17,7 +17,6 @@ use log::info;
 use serde::Deserialize;
 use serde_json::json;
 use std::{
-    collections::HashSet,
     net::SocketAddr,
     sync::{
         Arc,
@@ -89,7 +88,6 @@ struct User {
 struct AppState {
     pair_manager: PairManager,
 }
-
 /// ペア管理システム
 #[derive(Default)]
 struct PairManager {
@@ -99,8 +97,8 @@ struct PairManager {
     active_pairs: DashMap<Uuid, (Uuid, Tx)>,
     /// 接続済みユーザー数
     matched_count: AtomicU64,
-    /// ブロックリスト
-    blacklist: HashSet<Uuid>,
+    /// ブラックリスト ID, 解除までの残り時間
+    blacklist: DashMap<Uuid, u32>,
 }
 
 impl PairManager {
@@ -161,7 +159,11 @@ impl PairManager {
             // 相手側のペアリング情報も削除する
             self.active_pairs.remove(&partner_id);
             // 相手に切断メッセージを通知
-            let _ = partner_tx.send("パートナーが切断しました。".into());
+            let msg = schema::Message::System {
+                event: schema::SystemEvent::PartnerDisconnected,
+                message: "パートナーが切断しました".into(),
+            };
+            let _ = partner_tx.send(serde_json::to_string(&msg).unwrap());
         }
     }
 
@@ -171,6 +173,11 @@ impl PairManager {
             self.matched_count.load(Ordering::Relaxed),
             self.waiting.len() as u64,
         )
+    }
+
+    /// ブラックリスト登録
+    async fn add_to_blacklist(&self, device_id: Uuid, add_hours: u32) {
+        self.blacklist.insert(device_id, add_hours);
     }
 }
 
@@ -186,7 +193,8 @@ async fn main() -> Result<(), anyhow::Error> {
 
     let app = Router::new()
         .route("/ws", get(ws_handler))
-        .route("/get_people_count", get(get_people_count))
+        .route("/api/get_people_count", get(get_people_count))
+        .route("/api/report", post(report))
         .with_state(state)
         .layer(cors);
 
@@ -204,11 +212,12 @@ async fn get_people_count(State(state): State<Arc<AppState>>) -> impl IntoRespon
     Json(json!({ "matched": matched, "waiting": waiting }))
 }
 
-async fn report(
-    State(state): State<Arc<AppState>>,
-    Json(request): Json<ReportRequest>,
-) -> impl IntoResponse {
-    // TODO
+async fn report(State(state): State<Arc<AppState>>, Json(request): Json<ReportRequest>) {
+    let add_hours = request.reason.penalty();
+    state
+        .pair_manager
+        .add_to_blacklist(request.target_user_id, add_hours)
+        .await;
 }
 
 async fn ws_handler(
@@ -216,7 +225,7 @@ async fn ws_handler(
     Query(query): Query<ConnectQuery>,
     ws: WebSocketUpgrade,
 ) -> Result<impl IntoResponse, StatusCode> {
-    let is_blacklisted = state.pair_manager.blacklist.contains(&query.user_id);
+    let is_blacklisted = state.pair_manager.blacklist.contains_key(&query.user_id);
 
     Ok(ws.on_upgrade(move |socket| {
         handle_socket(
@@ -262,13 +271,26 @@ async fn handle_socket(
     };
 
     // === ペアリング処理 ===
-    if let Some((_partner_id, partner_tx)) = state.pair_manager.register(my_id, user) {
+    if let Some((partner_id, partner_tx)) = state.pair_manager.register(my_id, user) {
+        let msg_for_me = schema::Message::System {
+            event: schema::SystemEvent::MatchingCompleted { partner_id },
+            message: "ペアリングが完了しました！".into(),
+        };
+
+        let msg_for_partner = schema::Message::System {
+            event: schema::SystemEvent::MatchingCompleted { partner_id: my_id },
+            message: "ペアリングが完了しました".into(),
+        };
+
         // 後から参加した側がマッチングを完成させた場合
         let _ = ws_sender
-            .send(Message::Text("ペアリングが完了しました！".into()))
+            .send(Message::Text(
+                serde_json::to_string(&msg_for_me).unwrap().into(),
+            ))
             .await;
+
         // 待機中だった相手にもペアリング完了を通知
-        let _ = partner_tx.send("ペアリングが完了しました！".into());
+        let _ = partner_tx.send(serde_json::to_string(&msg_for_partner).unwrap());
     }
 
     // === メッセージの送受信ループ ===
@@ -278,27 +300,9 @@ async fn handle_socket(
             some_data = my_rx.recv() => {
                 match some_data {
                     Some(data) => {
-                        match serde_json::from_str::<schema::Message>(&data) {
-                            Ok(schema::Message::Chat { content }) => {
-                                // 自分のWebSocketへ送信
-                                if ws_sender.send(Message::Text(content.into())).await.is_err() {
-                                    break;
-                                }
-                            }
-                            Ok(schema::Message::System { event, message }) => {
-                                match event {
-                                    schema::SystemEvent::PartnerDisconnected => {
-                                        println!("{message}");
-                                        break;
-                                    }
-                                    schema::SystemEvent::MatchingCompleted => {
-                                        println!("{message}");
-                                    }
-                                }
-                            }
-                            Err(e) => {
-                                eprintln!("{e}");
-                            }
+                        // 自分のWebSocketへ送信
+                        if ws_sender.send(Message::Text(data.into())).await.is_err() {
+                            break;
                         }
                     }
                     None => {
@@ -313,7 +317,11 @@ async fn handle_socket(
                     Some(Ok(Message::Text(text))) => {
                         // パートナーの宛先へ送信
                         if state.pair_manager.send_to_partner(&my_id, text.to_string()).is_err() {
-                            let _ = ws_sender.send(Message::Text("パートナーへの送信に失敗しました。".into())).await;
+                            let msg = schema::Message::System {
+                                event: schema::SystemEvent::FailedToSendMessage,
+                                message: "メッセージの送信に失敗しました".into(),
+                            };
+                            let _ = ws_sender.send(Message::Text(serde_json::to_string(&msg).unwrap().into())).await;
                             break;
                         }
                     }
