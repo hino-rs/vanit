@@ -27,8 +27,7 @@ pub enum SystemEvent {
 pub struct ReportRequest {
     pub target_user_id: Uuid,
     pub reason: ReportReason,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub detail: Option<String>,
+    pub chat: Vec<String>,
 }
 
 /// 通報理由の選択肢
@@ -44,15 +43,4 @@ pub enum ReportReason {
     Harassment,
     /// その他
     Other,
-}
-
-impl ReportReason {
-    pub fn penalty(&self) -> i64 {
-        match self {
-            ReportReason::InappropriateLanguage => 4,
-            ReportReason::Spam => 12,
-            ReportReason::Harassment => 8,
-            ReportReason::Other => 2,
-        }
-    }
 }

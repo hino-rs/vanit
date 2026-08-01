@@ -17,3 +17,5 @@ log = "0.4.33"
 env_logger = "0.11.11"
 ts-rs = { version = "12.0.1", features = ["uuid-impl"] }
 chrono = { version = "0.4.45", features = ["serde"] }
+async-openai = { version = "0.41.3", features = ["moderation"] }
+dotenvy = "0.15.7"

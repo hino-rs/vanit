@@ -2,6 +2,11 @@ mod schema;
 use chrono::{DateTime, Duration, Utc};
 use schema::*;
 
+use async_openai::{
+    Client,
+    config::OpenAIConfig,
+    types::moderations::{CreateModerationRequestArgs, ModerationInput},
+};
 use axum::{
     Json, Router,
     extract::{
@@ -18,7 +23,9 @@ use log::info;
 use serde::Deserialize;
 use serde_json::json;
 use std::{
-    net::SocketAddr, str::FromStr, sync::{
+    net::SocketAddr,
+    str::FromStr,
+    sync::{
         Arc,
         atomic::{AtomicU64, Ordering},
     },
@@ -28,6 +35,67 @@ use tower_http::cors::CorsLayer;
 use uuid::Uuid;
 
 type Tx = mpsc::UnboundedSender<String>;
+
+async fn scoring_violates_terms(openai_client: &Client<OpenAIConfig>, chat: &[String]) -> f32 {
+    let combined_chat = chat.join("\n");
+    if combined_chat.trim().is_empty() {
+        return 0.0;
+    }
+
+    let request = match CreateModerationRequestArgs::default()
+        .model("omni-moderation-latest")
+        .input(ModerationInput::String(combined_chat))
+        .build()
+    {
+        Ok(req) => req,
+        Err(_) => return 0.0,
+    };
+
+    let response = match openai_client.moderations().create(request).await {
+        Ok(res) => res,
+        Err(err) => {
+            log::error!("OpenAI APIエラー: {:?}", err);
+            return 0.0;
+        }
+    };
+
+    if let Some(result) = response.results.first() {
+        let scores = &result.category_scores;
+
+        // 重大リスク（即時・重度BAN対象）の最高値
+        let critical_score = [
+            scores.sexual_minors,
+            scores.self_harm_instructions,
+            scores.hate_threatening,
+            scores.harassment_threatening,
+            scores.illicit_violent,
+        ]
+        .into_iter()
+        .fold(0.0f32, f32::max);
+
+        // 一般的な不適切な内容の最高値
+        let general_score = [
+            scores.hate,
+            scores.harassment,
+            scores.sexual,
+            scores.violence,
+            scores.self_harm,
+            scores.illicit,
+        ]
+        .into_iter()
+        .fold(0.0f32, f32::max);
+
+        let effective_general = if general_score > 0.05 {
+            general_score
+        } else {
+            0.0
+        };
+
+        return critical_score.max(effective_general);
+    }
+
+    0.0
+}
 
 #[derive(Deserialize)]
 struct ConnectQuery {
@@ -87,6 +155,7 @@ struct User {
 #[derive(Default)]
 struct AppState {
     pair_manager: PairManager,
+    openai_client: Client<OpenAIConfig>,
 }
 /// ペア管理システム
 #[derive(Default)]
@@ -190,11 +259,12 @@ impl PairManager {
 
     /// バン状態の確認
     pub fn is_blacklisted(&self, device_id: &Uuid) -> bool {
-        if let Some(until) = self.blacklist.get(device_id) {
-            if Utc::now() < *until.value() {
-                return true;
-            }
+        if let Some(until) = self.blacklist.get(device_id)
+            && Utc::now() < *until.value()
+        {
+            return true;
         }
+
         // 期限切れの場合はブラックリストから削除
         self.blacklist.remove(device_id);
         false
@@ -208,14 +278,32 @@ async fn main() -> Result<(), anyhow::Error> {
         .init();
     let cors = CorsLayer::permissive();
 
-    let app_state = AppState::default();
+    let mut app_state = AppState::default();
+
+    if let Ok(path) = std::env::current_dir() {
+        println!("カレントディレクトリ: {path:?}");
+    }
+    match dotenvy::dotenv() {
+        Ok(path) => println!(".env を読み込みました: {:?}", path),
+        Err(e) => println!(".env の読み込みに失敗しました: {:?}", e),
+    }
+
+    match std::env::var("OPENAI_API_KEY") {
+        Ok(val) => println!("OPENAI_API_KEY 取得成功 (文字数: {})", val.len()),
+        Err(e) => println!("OPENAI_API_KEY 取得失敗: {:?}", e),
+    }
+
+    let openai_client = Client::new();
+
+    app_state.openai_client = openai_client;
+
     let state = Arc::new(app_state);
 
     let app = Router::new()
         .route("/ws", get(ws_handler))
         .route("/api/get_people_count", get(get_people_count))
         .route("/api/report", post(report))
-        .route("/api/blacklisted_check", get(blacklisted_check))
+        .route("/api/blacklisted_check", post(blacklisted_check))
         .with_state(state)
         .layer(cors);
 
@@ -233,18 +321,27 @@ async fn get_people_count(State(state): State<Arc<AppState>>) -> impl IntoRespon
     Json(json!({ "matched": matched, "waiting": waiting }))
 }
 
-async fn report(State(state): State<Arc<AppState>>, Json(request): Json<ReportRequest>) {
-    let add_hours = request.reason.penalty();
-    state
-        .pair_manager
-        .add_to_blacklist(request.target_user_id, add_hours)
-        .await;
+async fn report(
+    State(state): State<Arc<AppState>>,
+    Json(request): Json<ReportRequest>,
+) -> StatusCode {
+    let score = scoring_violates_terms(&state.openai_client, &request.chat).await;
+    // スコアが0.1以上で対象入り
+    if score >= 0.1 {
+        let penalty = ((score * 10.0) as i64).max(1); // 最低一時間
+        state
+            .pair_manager
+            .add_to_blacklist(request.target_user_id, penalty)
+            .await;
+        return StatusCode::OK;
+    }
+    StatusCode::OK
 }
 
 async fn blacklisted_check(State(state): State<Arc<AppState>>, device_id: String) {
     if let Ok(uuid) = Uuid::from_str(&device_id) {
         // 一旦バンかは知らせない
-        let _  = state.pair_manager.is_blacklisted(&uuid);
+        let _ = state.pair_manager.is_blacklisted(&uuid);
     }
 }
 

@@ -4,4 +4,4 @@ import type { ReportReason } from "./ReportReason";
 /**
  * 通報リクエスト
  */
-export type ReportRequest = { target_user_id: string, reason: ReportReason, detail: string | null, };
+export type ReportRequest = { target_user_id: string, reason: ReportReason, chat: string[] };

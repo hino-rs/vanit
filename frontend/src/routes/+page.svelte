@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onDestroy, onMount } from 'svelte';
+	import { SvelteMap } from 'svelte/reactivity';
 	import { CREDITS_DATA } from '$lib/data/credits';
 	import { STORAGE_KEYS } from '$lib/constants/storage';
 	import * as Types from '$lib/types';
@@ -68,8 +69,11 @@
 		time: string;
 	}
 
-	let partnersRecord = $state<string[]>([]);
+	let lastMessageTime: number | null = null;
+	let elapsedSeconds: number | null = null;
+	let partnersRecord = new SvelteMap<string, string[]>();
 	let userId: string = '';
+	let partnerId: string = '';
 	let isFirstConnect = $state(true);
 	let creditModal: HTMLDialogElement;
 	let privacyPolicyModal: HTMLDialogElement;
@@ -172,7 +176,7 @@
 		if (socket) return;
 		try {
 			await fetch('http://localhost:3000/api/blacklisted_check', {
-				method: 'GET',
+				method: 'POST',
 				body: userId
 			});
 		} catch (err) {
@@ -210,42 +214,44 @@
 					if (data.event.type === 'matching_completed') {
 						status = 'paired';
 						isPaired = true;
-						partnersRecord.push(data.event.partner_id);
-						console.log(partnersRecord);
+						partnerId = data.event.partner_id;
+						if (!partnersRecord.has(partnerId)) {
+							partnersRecord.set(partnerId, []);
+						}
+						lastMessageTime = null;
 					} else if (data.event.type === 'partner_disconnected') {
 						isPaired = false;
 						status = 'disconnected';
 						disconnect();
+						lastMessageTime = null;
+						elapsedSeconds = null;
+						console.log(partnersRecord.values());
 					} else if (data.event.type === 'failed_to_send_message') {
 						console.error('メッセージの送信に失敗');
 					}
 				} else if (data.type === 'chat') {
+					const currentTime = performance.now();
 					partnerText = data.content;
+
+					let currentRecord = partnersRecord.get(partnerId) ?? [];
+					const isNewMessageBlock =
+						lastMessageTime === null ||
+						(currentTime - lastMessageTime) / 1000 > 1.0 ||
+						currentRecord.length === 0;
+
+					if (isNewMessageBlock) {
+						currentRecord = [...currentRecord, partnerText];
+					} else {
+						currentRecord = [...currentRecord.slice(0, -1), partnerText];
+					}
+					partnersRecord.set(partnerId, currentRecord);
+					lastMessageTime = currentTime;
 				} else {
 					console.error('不明なメッセージ');
 				}
 			} catch (err) {
 				console.error('メッセージのパースに失敗:', err);
 			}
-
-			// if (data === 'ペアリングが完了しました！') {
-			// 	// サーバー側で2人がマッチングしたとき
-			// 	status = 'paired';
-			// 	isPaired = true;
-			// 	addLog('ペアリングが完了しました。相手との相互通信を開始できます。', 'system');
-			// } else if (data === 'パートナーが切断しました。') {
-			// 	// 相手がブラウザを閉じたとき
-			// 	isPaired = false;
-			// 	status = 'disconnected';
-			// 	addLog('⚠️ パートナーが切断しました。', 'system');
-			// 	disconnect();
-			// } else if (data === 'パートナーへの送信に失敗しました。') {
-			// 	addLog('⚠️ パートナーへのメッセージ送信に失敗しました。', 'system');
-			// } else {
-			// 	// それ以外の文字列は相手からのチャットメッセージ
-			// 	addLog(data, 'received');
-			// 	partnerText = data;
-			// }
 		};
 
 		socket.onerror = () => {
@@ -257,6 +263,7 @@
 			isPaired = false;
 			addLog('WebSocket 接続が切断されました。', 'system');
 			socket = null;
+			partnerText = '';
 		};
 	}
 
@@ -267,6 +274,7 @@
 		}
 		status = 'disconnected';
 		isPaired = false;
+		partnerText = '';
 	}
 
 	function sendMessage() {
@@ -280,11 +288,11 @@
 		addLog(messageToSend, 'sent');
 	}
 
-	async function report_partner(id: string, reason: Types.ReportReason) {
+	async function reportPartner(id: string, reason: Types.ReportReason, chat: string[]) {
 		let reportRequest: Types.ReportRequest = {
 			target_user_id: id,
 			reason: reason,
-			detail: ''
+			chat: chat,
 		};
 		try {
 			await fetch('http://localhost:3000/api/report', {
@@ -521,28 +529,54 @@
 			<button class="btn absolute top-2 right-2 btn-circle btn-ghost btn-sm">✕</button>
 		</form>
 		<h3 class="text-lg font-bold">パートナー履歴</h3>
-		<ul class="list">
-			{#each partnersRecord as partner_id, i}
-				<li class="list-row">
-					{partner_id}
-					<button class="btn" popovertarget="popover{i}" style="anchor-name:--anchor-{i}"
-						>通報する</button
+		{#if partnersRecord.size === 0}
+			<p class="py-4 text-sm text-base-content/60">まだ履歴はありません。</p>
+		{:else}
+			<ul class="list mt-4 space-y-3">
+				{#each partnersRecord as [partner_id, chat], i (partner_id)}
+					<li
+						class="list-row flex items-center justify-between gap-2 rounded-lg border border-base-300 p-3"
 					>
-					<ul
-						class="menu dropdown w-52 rounded-box bg-base-100 shadow-sm"
-						popover
-						id="popover{i}"
-						style="position-anchor:--anchor-{i}"
-					>
-						{#each Types.REPORT_REASON as reason}
-							<li>
-								<button onclick={async () => report_partner(partner_id, reason)}>{reason}</button>
-							</li>
-						{/each}
-					</ul>
-				</li>
-			{/each}
-		</ul>
+						<div class="flex-1 overflow-hidden">
+							<div class="font-mono text-xs text-base-content/70">ID: {partner_id}</div>
+							<div class="mt-1 text-sm font-medium text-base-content">
+								{#if chat.length > 0}
+									{chat.join(' / ')}
+								{:else}
+									<span class="text-base-content/50 italic">（メッセージなし）</span>
+								{/if}
+							</div>
+						</div>
+						<div class="relative">
+							<button
+								class="btn btn-sm btn-warning"
+								popovertarget="popover-{i}"
+								style="anchor-name:--anchor-{i}"
+							>
+								通報する
+							</button>
+							<ul
+								class="menu dropdown w-52 rounded-box border border-base-300 bg-base-100 p-2 shadow-lg"
+								popover
+								id="popover-{i}"
+								style="position-anchor:--anchor-{i}"
+							>
+								{#each Types.REPORT_REASON as reason}
+									<li>
+										<button
+											class="text-xs"
+											onclick={async () => reportPartner(partner_id, reason, chat)}
+										>
+											{reason}
+										</button>
+									</li>
+								{/each}
+							</ul>
+						</div>
+					</li>
+				{/each}
+			</ul>
+		{/if}
 	</div>
 	<form method="dialog" class="modal-backdrop">
 		<button>close</button>
