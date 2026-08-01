@@ -704,20 +704,13 @@
 		>
 			<option disabled selected value="not-selected">Select your language</option>
 			<option value="ja">Japanese</option>
-			<option value="en">English</option>
-			<option value="zh">Chinese</option>
-			<option value="hi">Hindi</option>
-			<option value="es">Spanish</option>
-			<option value="ar">Arabic</option>
-			<option value="fr">French</option>
-			<option value="bn">Bengali</option>
-			<option value="pt">Portuguese</option>
-			<option value="id">Indonesian</option>
-			<option value="ur">Urdu</option>
-			<option value="ru">Russian</option>
-			<option value="de">German</option>
-			<option value="pcm">Nigerian Pidgin</option>
-			<option value="arz">Egyptian Arabic</option>
+            <option value="id">Indonesian</option>
+            <option value="fil">Filipino</option>
+            <option value="en">English</option>
+            <option value="vi">Vietnamese</option>
+            <option value="th">Thai</option>
+            <option value="ms">Malay</option>
+            <option value="zh">Chinese</option>
 		</select>
 
 		<div class="flex min-w-64 justify-end">

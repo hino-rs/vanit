@@ -103,44 +103,30 @@ struct ConnectQuery {
     lang: String,
 }
 
-#[derive(Clone, Default, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Default)]
 enum Language {
     Japanese,
+    Indonesian,
+    Filipino,
     #[default]
     English,
+    Vietnamese,
+    Thai,
+    Malay,
     Chinese,
-    Hindi,
-    Spanish,
-    Arabic,
-    French,
-    Bengali,
-    Portuguese,
-    Indonesian,
-    Urdu,
-    Russian,
-    German,
-    NigerianPidgin,
-    EgyptianArabic,
 }
 
 impl Language {
     fn from_str(str: &str) -> Language {
         match str {
             "ja" => Self::Japanese,
-            "en" => Self::English,
-            "zh" => Self::Chinese,
-            "hi" => Self::Hindi,
-            "es" => Self::Spanish,
-            "ar" => Self::Arabic,
-            "fr" => Self::French,
-            "bn" => Self::Bengali,
-            "pt" => Self::Portuguese,
             "id" => Self::Indonesian,
-            "ur" => Self::Urdu,
-            "ru" => Self::Russian,
-            "de" => Self::German,
-            "pcm" => Self::NigerianPidgin,
-            "arz" => Self::EgyptianArabic,
+            "fil" => Self::Filipino,
+            "en" => Self::English,
+            "vi" => Self::Vietnamese,
+            "th" => Self::Thai,
+            "ms" => Self::Malay,
+            "zh" => Self::Chinese,
             _ => Self::default(),
         }
     }
