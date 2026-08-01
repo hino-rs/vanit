@@ -10,7 +10,7 @@
 			id = crypto.randomUUID();
 			localStorage.setItem(STORAGE_KEYS.DEVICE_ID, id);
 		}
-		return id
+		return id;
 	}
 
 	let creditSearch = $state('');
@@ -68,13 +68,14 @@
 		time: string;
 	}
 
-
-	let userId: string = ""
+	let partnersRecord = $state<string[]>([]);
+	let userId: string = '';
 	let isFirstConnect = $state(true);
 	let creditModal: HTMLDialogElement;
 	let privacyPolicyModal: HTMLDialogElement;
 	let structureNoteModal: HTMLDialogElement;
 	let termsOfServiceModal: HTMLDialogElement;
+	let partnersRecordModal: HTMLDialogElement;
 	let theme = $state<Theme>('dark');
 	let status = $state<ConnectionStatus>('disconnected'); // 現在の通信状態
 	let isPaired = $state(false); // ペアリング済みかどうか
@@ -197,18 +198,23 @@
 		socket.onmessage = (event: MessageEvent) => {
 			try {
 				const data: Types.Message = JSON.parse(event.data);
-				console.log(data);
-				if (data.type === 'system' && data.event.type === 'matching_completed') {
-					status = 'paired';
-					isPaired = true;
-				} else if (data.type === 'system' && data.event.type === 'partner_disconnected') {
-					isPaired = false;
-					status = 'disconnected';
-					disconnect();
-				} else if (data.type === 'system' && data.event.type === 'failed_to_send_message') {
-					console.log("メッセージの送信に失敗");
+				if (data.type === 'system') {
+					if (data.event.type === 'matching_completed') {
+						status = 'paired';
+						isPaired = true;
+						partnersRecord.push(data.event.partner_id);
+						console.log(partnersRecord);
+					} else if (data.event.type === 'partner_disconnected') {
+						isPaired = false;
+						status = 'disconnected';
+						disconnect();
+					} else if (data.event.type === 'failed_to_send_message') {
+						console.error('メッセージの送信に失敗');
+					}
 				} else if (data.type === 'chat') {
 					partnerText = data.content;
+				} else {
+					console.error('不明なメッセージ');
 				}
 			} catch (err) {
 				console.error('メッセージのパースに失敗:', err);
@@ -259,21 +265,30 @@
 		if (!isPaired || !socket) return;
 		const messageToSend = inputText.trim();
 		let data: Types.Message = {
-			type: "chat",
-			content: messageToSend,
-		}
+			type: 'chat',
+			content: messageToSend
+		};
 		socket.send(JSON.stringify(data)); // サーバーへ送信
 		addLog(messageToSend, 'sent');
 	}
 
-	function report_partner() {
-		if (!isPaired || !socket) return;
-		let data: Types.ReportRequest = {
-			target_user_id: "aaabbb", 
-			reason: "harassment", 
-			detail: "うぜえ",
+	async function report_partner(id: string, reason: Types.ReportReason) {
+		let reportRequest: Types.ReportRequest = {
+			target_user_id: id,
+			reason: reason,
+			detail: ''
+		};
+		try {
+			await fetch('http://localhost:3000/api/report', {
+				method: 'POST',
+				headers: {
+					'Content-Type': 'application/json'
+				},
+				body: JSON.stringify(reportRequest)
+			});
+		} catch (err) {
+			console.error(err);
 		}
-		socket.send(JSON.stringify(data));
 	}
 
 	onDestroy(() => {
@@ -491,6 +506,39 @@
 	</form>
 </dialog>
 
+<!-- やりとり相手の履歴 -->
+<dialog bind:this={partnersRecordModal} class="modal">
+	<div class="modal-box h-128">
+		<form method="dialog">
+			<button class="btn absolute top-2 right-2 btn-circle btn-ghost btn-sm">✕</button>
+		</form>
+		<h3 class="text-lg font-bold">パートナー履歴</h3>
+		<ul class="list">
+			{#each partnersRecord as partner_id, i}
+				<li class="list-row">
+					{partner_id}
+					<button class="btn" popovertarget="popover{i}" style="anchor-name:--anchor-{i}"
+						>通報する</button
+					>
+					<ul
+						class="menu dropdown w-52 rounded-box bg-base-100 shadow-sm"
+						popover
+						id="popover{i}"
+						style="position-anchor:--anchor-{i}"
+					>
+						{#each Types.REPORT_REASON as reason}
+							<li><button onclick={async () => report_partner(partner_id, reason)}>{reason}</button></li>
+						{/each}
+					</ul>
+				</li>
+			{/each}
+		</ul>
+	</div>
+	<form method="dialog" class="modal-backdrop">
+		<button>close</button>
+	</form>
+</dialog>
+
 <!-- 利用規約 -->
 <dialog bind:this={termsOfServiceModal} class="modal">
 	<div class="modal-box w-11/12 max-w-5xl">
@@ -561,6 +609,7 @@
 		<option value="dark">🌙Dark</option>
 		<option value="system">💻System</option>
 	</select>
+	<button class="btn m-auto" onclick={() => partnersRecordModal.showModal()}>履歴</button>
 </header>
 
 <main class="mx-auto max-w-6xl px-4 font-sans">
@@ -648,7 +697,6 @@
 		<div class="flex flex-col gap-1.5">
 			<div class="">
 				<span class="text-[0.85rem] font-semibold text-base-content">相手のメッセージ</span>
-				<button class="btn ml-4" onclick={() => { report_partner() }}>通報する</button>
 			</div>
 			<div class="flex items-center rounded-md bg-base-200 break-all text-base-content">
 				{#if partnerText}

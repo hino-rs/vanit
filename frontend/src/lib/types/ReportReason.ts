@@ -3,4 +3,8 @@
 /**
  * 通報理由の選択肢
  */
-export type ReportReason = "inappropriate_language" | "spam" | "harassment" | "other";
+// export type ReportReason = "inappropriate_language" | "spam" | "harassment" | "other";
+export const REPORT_REASON = [
+    "inappropriate_language", "spam", "harassment", "other"
+] as const;
+export type ReportReason = typeof REPORT_REASON[number];

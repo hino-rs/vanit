@@ -213,6 +213,7 @@ async fn get_people_count(State(state): State<Arc<AppState>>) -> impl IntoRespon
 }
 
 async fn report(State(state): State<Arc<AppState>>, Json(request): Json<ReportRequest>) {
+    println!("通報が届きました: {:?}", request);
     let add_hours = request.reason.penalty();
     state
         .pair_manager
