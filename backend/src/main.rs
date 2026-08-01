@@ -1,4 +1,5 @@
 mod schema;
+use chrono::{DateTime, Duration, Utc};
 use schema::*;
 
 use axum::{
@@ -17,8 +18,7 @@ use log::info;
 use serde::Deserialize;
 use serde_json::json;
 use std::{
-    net::SocketAddr,
-    sync::{
+    net::SocketAddr, str::FromStr, sync::{
         Arc,
         atomic::{AtomicU64, Ordering},
     },
@@ -98,7 +98,7 @@ struct PairManager {
     /// 接続済みユーザー数
     matched_count: AtomicU64,
     /// ブラックリスト ID, 解除までの残り時間
-    blacklist: DashMap<Uuid, u32>,
+    blacklist: DashMap<Uuid, DateTime<Utc>>,
 }
 
 impl PairManager {
@@ -176,8 +176,28 @@ impl PairManager {
     }
 
     /// ブラックリスト登録
-    async fn add_to_blacklist(&self, device_id: Uuid, add_hours: u32) {
-        self.blacklist.insert(device_id, add_hours);
+    async fn add_to_blacklist(&self, device_id: Uuid, add_hours: i64) {
+        let now = Utc::now();
+        self.blacklist
+            .entry(device_id)
+            .and_modify(|until| {
+                // 既存のバン期間が残っていればそこから延長、切れていれば現在時刻から加算
+                let base_time = if *until > now { *until } else { now };
+                *until = base_time + Duration::hours(add_hours);
+            })
+            .or_insert_with(|| now + Duration::hours(add_hours));
+    }
+
+    /// バン状態の確認
+    pub fn is_blacklisted(&self, device_id: &Uuid) -> bool {
+        if let Some(until) = self.blacklist.get(device_id) {
+            if Utc::now() < *until.value() {
+                return true;
+            }
+        }
+        // 期限切れの場合はブラックリストから削除
+        self.blacklist.remove(device_id);
+        false
     }
 }
 
@@ -195,6 +215,7 @@ async fn main() -> Result<(), anyhow::Error> {
         .route("/ws", get(ws_handler))
         .route("/api/get_people_count", get(get_people_count))
         .route("/api/report", post(report))
+        .route("/api/blacklisted_check", get(blacklisted_check))
         .with_state(state)
         .layer(cors);
 
@@ -213,12 +234,18 @@ async fn get_people_count(State(state): State<Arc<AppState>>) -> impl IntoRespon
 }
 
 async fn report(State(state): State<Arc<AppState>>, Json(request): Json<ReportRequest>) {
-    println!("通報が届きました: {:?}", request);
     let add_hours = request.reason.penalty();
     state
         .pair_manager
         .add_to_blacklist(request.target_user_id, add_hours)
         .await;
+}
+
+async fn blacklisted_check(State(state): State<Arc<AppState>>, device_id: String) {
+    if let Ok(uuid) = Uuid::from_str(&device_id) {
+        // 一旦バンかは知らせない
+        let _  = state.pair_manager.is_blacklisted(&uuid);
+    }
 }
 
 async fn ws_handler(

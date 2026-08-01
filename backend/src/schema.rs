@@ -47,7 +47,7 @@ pub enum ReportReason {
 }
 
 impl ReportReason {
-    pub fn penalty(&self) -> u32 {
+    pub fn penalty(&self) -> i64 {
         match self {
             ReportReason::InappropriateLanguage => 4,
             ReportReason::Spam => 12,

@@ -16,3 +16,4 @@ tower-http = { version = "0.7.0", features = ["cors"] }
 log = "0.4.33"
 env_logger = "0.11.11"
 ts-rs = { version = "12.0.1", features = ["uuid-impl"] }
+chrono = { version = "0.4.45", features = ["serde"] }

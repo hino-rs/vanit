@@ -170,6 +170,14 @@
 
 	async function connect() {
 		if (socket) return;
+		try {
+			await fetch('http://localhost:3000/api/blacklisted_check', {
+				method: 'GET',
+				body: userId
+			});
+		} catch (err) {
+			console.error(err);
+		}
 		if (lang && lang.value === 'not-selected') {
 			languageNotSelected = true;
 			return;
@@ -527,7 +535,9 @@
 						style="position-anchor:--anchor-{i}"
 					>
 						{#each Types.REPORT_REASON as reason}
-							<li><button onclick={async () => report_partner(partner_id, reason)}>{reason}</button></li>
+							<li>
+								<button onclick={async () => report_partner(partner_id, reason)}>{reason}</button>
+							</li>
 						{/each}
 					</ul>
 				</li>
