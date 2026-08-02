@@ -81,8 +81,6 @@ class ChatStore {
 						}
 						this.lastMessageTime = null;
 					} else if (data.event.type === 'partner_disconnected') {
-						this.isPaired = false;
-						this.status = 'disconnected';
 						this.disconnect();
 						this.lastMessageTime = null;
 						this.elapsedSeconds = null;
@@ -131,11 +129,7 @@ class ChatStore {
 	disconnect() {
 		if (this.socket) {
 			this.socket.close();
-			this.socket = null;
 		}
-		this.status = 'disconnected';
-		this.isPaired = false;
-		this.partnerText = '';
 	}
 
 	sendMessage() {

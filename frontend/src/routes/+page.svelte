@@ -143,13 +143,19 @@
 		>
 			<option disabled selected value="not-selected">Select your language</option>
 			<option value="ja">Japanese</option>
-			<option value="id">Indonesian</option>
-			<option value="fil">Filipino</option>
-			<option value="en">English</option>
-			<option value="vi">Vietnamese</option>
-			<option value="th">Thai</option>
-			<option value="ms">Malay</option>
-			<option value="zh">Chinese</option>
+            <option value="en">English</option>
+            <option value="ga">Irish</option>
+            <option value="nl">Dutch</option>
+            <option value="de">German</option>
+            <option value="fr">French</option>
+            <option value="it">Italian</option>
+            <option value="es">Spanish</option>
+            <option value="pt">Portuguese</option>
+            <option value="ko">Korean</option>
+            <option value="ms">Malay</option>
+            <option value="fil">Filipino</option>
+            <option value="id">Indonesian</option>
+            <option value="th">Thai</option>
 		</select>
 
 		<div class="flex min-w-64 justify-end">

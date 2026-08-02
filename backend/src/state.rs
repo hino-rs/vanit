@@ -22,27 +22,39 @@ pub enum SendError {
 #[derive(Clone, Debug, PartialEq, Default)]
 pub enum Language {
     Japanese,
-    Indonesian,
-    Filipino,
     #[default]
     English,
-    Vietnamese,
-    Thai,
+    Irish, // ライルランド語
+    Dutch, // オランダ語
+    German,
+    French,
+    Italian,
+    Spanish,
+    Portuguese,
+    Korean,
     Malay,
-    Chinese,
+    Filipino,
+    Indonesian,
+    Thai,
 }
 
 impl Language {
     pub fn parse_or_default(str: &str) -> Language {
         match str {
             "ja" => Self::Japanese,
-            "id" => Self::Indonesian,
-            "fil" => Self::Filipino,
             "en" => Self::English,
-            "vi" => Self::Vietnamese,
-            "th" => Self::Thai,
+            "ga" => Self::Irish,
+            "nl" => Self::Dutch,
+            "de" => Self::German,
+            "fr" => Self::French,
+            "it" => Self::Italian,
+            "es" => Self::Spanish,
+            "pt" => Self::Portuguese,
+            "ko" => Self::Korean,
             "ms" => Self::Malay,
-            "zh" => Self::Chinese,
+            "fil" => Self::Filipino,
+            "id" => Self::Indonesian,
+            "th" => Self::Thai,
             _ => Self::default(),
         }
     }
