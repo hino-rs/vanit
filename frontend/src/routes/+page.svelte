@@ -174,14 +174,7 @@
 
 	async function connect() {
 		if (socket) return;
-		try {
-			await fetch('http://localhost:3000/api/blacklisted_check', {
-				method: 'POST',
-				body: userId
-			});
-		} catch (err) {
-			console.error(err);
-		}
+
 		if (lang && lang.value === 'not-selected') {
 			languageNotSelected = true;
 			return;

@@ -24,7 +24,6 @@ use serde::Deserialize;
 use serde_json::json;
 use std::{
     net::SocketAddr,
-    str::FromStr,
     sync::{
         Arc,
         atomic::{AtomicU64, Ordering},
@@ -35,6 +34,19 @@ use tower_http::cors::CorsLayer;
 use uuid::Uuid;
 
 type Tx = mpsc::UnboundedSender<String>;
+
+const BLACKLIST_SCORE_THRESHOLD: f32 = 0.1;
+const GENERAL_SCORE_NOISE_FLOOR: f32 = 0.05;
+const PENALTY_HOURS_PER_SCORE: f32 = 10.0;
+const MIN_PENALTY_HOURS: i64 = 1;
+
+#[derive(Debug, thiserror::Error)]
+enum SendError {
+    #[error("パートナーが見つかりません")]
+    PartnerNotFound,
+    #[error("送信に失敗しました")]
+    SendFailed,
+}
 
 async fn scoring_violates_terms(openai_client: &Client<OpenAIConfig>, chat: &[String]) -> f32 {
     let combined_chat = chat.join("\n");
@@ -85,7 +97,7 @@ async fn scoring_violates_terms(openai_client: &Client<OpenAIConfig>, chat: &[St
         .into_iter()
         .fold(0.0f32, f32::max);
 
-        let effective_general = if general_score > 0.05 {
+        let effective_general = if general_score > GENERAL_SCORE_NOISE_FLOOR {
             general_score
         } else {
             0.0
@@ -117,7 +129,7 @@ enum Language {
 }
 
 impl Language {
-    fn from_str(str: &str) -> Language {
+    fn parse_or_default(str: &str) -> Language {
         match str {
             "ja" => Self::Japanese,
             "id" => Self::Indonesian,
@@ -172,15 +184,13 @@ impl PairManager {
             && let Some((_, partner_data)) = self.waiting.remove(&partner_id)
         {
             self.matched_count.fetch_add(2, Ordering::Relaxed);
-            if partner_data.language == my_data.language {
-                // 双方向にactive_pairsへ登録
-                self.active_pairs
-                    .insert(my_id, (partner_id, partner_data.tx.clone()));
-                self.active_pairs
-                    .insert(partner_id, (my_id, my_data.tx.clone()));
+            // 双方向にactive_pairsへ登録
+            self.active_pairs
+                .insert(my_id, (partner_id, partner_data.tx.clone()));
+            self.active_pairs
+                .insert(partner_id, (my_id, my_data.tx.clone()));
 
-                return Some((partner_id, partner_data.tx));
-            }
+            return Some((partner_id, partner_data.tx));
         }
 
         // 待機者がいなければ自分が待合室に入る
@@ -190,16 +200,16 @@ impl PairManager {
     }
 
     /// メッセージを相手に転送する
-    fn send_to_partner(&self, my_id: &Uuid, message: String) -> Result<(), &'static str> {
+    fn send_to_partner(&self, my_id: &Uuid, message: String) -> Result<(), SendError> {
         let partner_tx = self
             .active_pairs
             .get(my_id)
             .map(|guard| guard.value().1.clone());
 
         if let Some(tx) = partner_tx {
-            tx.send(message).map_err(|_| "送信失敗")
+            tx.send(message).map_err(|_| SendError::SendFailed)
         } else {
-            Err("パートナーが見つかりません")
+            Err(SendError::PartnerNotFound)
         }
     }
 
@@ -223,7 +233,7 @@ impl PairManager {
     }
 
     /// 待機中の人数を返す(マッチング者数, 待機者数)
-    async fn count_data(&self) -> (u64, u64) {
+    fn count_data(&self) -> (u64, u64) {
         (
             self.matched_count.load(Ordering::Relaxed),
             self.waiting.len() as u64,
@@ -267,16 +277,16 @@ async fn main() -> Result<(), anyhow::Error> {
     let mut app_state = AppState::default();
 
     if let Ok(path) = std::env::current_dir() {
-        println!("カレントディレクトリ: {path:?}");
+        info!("カレントディレクトリ: {path:?}");
     }
     match dotenvy::dotenv() {
-        Ok(path) => println!(".env を読み込みました: {:?}", path),
-        Err(e) => println!(".env の読み込みに失敗しました: {:?}", e),
+        Ok(path) => info!(".env を読み込みました: {:?}", path),
+        Err(e) => info!(".env の読み込みに失敗しました: {:?}", e),
     }
 
     match std::env::var("OPENAI_API_KEY") {
-        Ok(val) => println!("OPENAI_API_KEY 取得成功 (文字数: {})", val.len()),
-        Err(e) => println!("OPENAI_API_KEY 取得失敗: {:?}", e),
+        Ok(val) => info!("OPENAI_API_KEY 取得成功 (文字数: {})", val.len()),
+        Err(e) => info!("OPENAI_API_KEY 取得失敗: {:?}", e),
     }
 
     let openai_client = Client::new();
@@ -289,13 +299,12 @@ async fn main() -> Result<(), anyhow::Error> {
         .route("/ws", get(ws_handler))
         .route("/api/get_people_count", get(get_people_count))
         .route("/api/report", post(report))
-        .route("/api/blacklisted_check", post(blacklisted_check))
         .with_state(state)
         .layer(cors);
 
     let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
 
-    println!("listening on {addr}");
+    info!("listening on {addr}");
     let listener = tokio::net::TcpListener::bind(addr).await?;
     axum::serve(listener, app).await?;
 
@@ -303,7 +312,7 @@ async fn main() -> Result<(), anyhow::Error> {
 }
 
 async fn get_people_count(State(state): State<Arc<AppState>>) -> impl IntoResponse {
-    let (matched, waiting) = state.pair_manager.count_data().await;
+    let (matched, waiting) = state.pair_manager.count_data();
     Json(json!({ "matched": matched, "waiting": waiting }))
 }
 
@@ -313,22 +322,14 @@ async fn report(
 ) -> StatusCode {
     let score = scoring_violates_terms(&state.openai_client, &request.chat).await;
     // スコアが0.1以上で対象入り
-    if score >= 0.1 {
-        let penalty = ((score * 10.0) as i64).max(1); // 最低一時間
+    if score >= BLACKLIST_SCORE_THRESHOLD {
+        let penalty = ((score * PENALTY_HOURS_PER_SCORE) as i64).max(MIN_PENALTY_HOURS); // 最低一時間
         state
             .pair_manager
             .add_to_blacklist(request.target_user_id, penalty)
             .await;
-        return StatusCode::OK;
     }
     StatusCode::OK
-}
-
-async fn blacklisted_check(State(state): State<Arc<AppState>>, device_id: String) {
-    if let Ok(uuid) = Uuid::from_str(&device_id) {
-        // 一旦バンかは知らせない
-        let _ = state.pair_manager.is_blacklisted(&uuid);
-    }
 }
 
 async fn ws_handler(
@@ -336,14 +337,14 @@ async fn ws_handler(
     Query(query): Query<ConnectQuery>,
     ws: WebSocketUpgrade,
 ) -> Result<impl IntoResponse, StatusCode> {
-    let is_blacklisted = state.pair_manager.blacklist.contains_key(&query.user_id);
+    let is_blacklisted = state.pair_manager.is_blacklisted(&query.user_id);
 
     Ok(ws.on_upgrade(move |socket| {
         handle_socket(
             socket,
             state,
             query.user_id,
-            Language::from_str(&query.lang),
+            Language::parse_or_default(&query.lang),
             is_blacklisted,
         )
     }))

@@ -19,3 +19,4 @@ serde = { version = "1.0.229", features = ["derive"] }
 tower-http = { version = "0.7.0", features = ["cors"] }
 ts-rs = { version = "12.0.1", features = ["uuid-impl"] }
 async-openai = { version = "0.41.3", features = ["moderation"] }
+thiserror = "2.0.19"
