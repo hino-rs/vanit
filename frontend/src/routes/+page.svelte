@@ -1,169 +1,27 @@
 <script lang="ts">
 	import { onDestroy, onMount } from 'svelte';
-	import { SvelteMap } from 'svelte/reactivity';
-	import { CREDITS_DATA } from '$lib/data/credits';
 	import { STORAGE_KEYS } from '$lib/constants/storage';
-	import * as Types from '$lib/types';
+	import { fetchPeopleCount } from '$lib/api/client';
+	import { initTheme, theme } from '$lib/stores/theme.svelte';
+	import { chatStore } from '$lib/stores/chat.svelte';
 
-	function getOrCreateDeviceId(): string {
-		let id = localStorage.getItem(STORAGE_KEYS.DEVICE_ID);
-		if (!id) {
-			id = crypto.randomUUID();
-			localStorage.setItem(STORAGE_KEYS.DEVICE_ID, id);
-		}
-		return id;
-	}
+	import EligibilityModal from '$lib/components/EligibilityModal.svelte';
+	import StructureNoteModal from '$lib/components/StructureNoteModal.svelte';
+	import PrivacyPolicyModal from '$lib/components/PrivacyPolicyModal.svelte';
+	import TermsModal from '$lib/components/TermsModal.svelte';
+	import PartnersRecordModal from '$lib/components/PartnersRecordModal.svelte';
+	import CreditsList from '$lib/components/CreditsList.svelte';
 
-	let creditSearch = $state('');
-	let creditCategory = $state<'all' | 'frontend' | 'backend'>('all');
+	let eligibilityModal: HTMLDialogElement | undefined = $state();
+	let creditModal: HTMLDialogElement | undefined = $state();
+	let privacyPolicyModal: HTMLDialogElement | undefined = $state();
+	let structureNoteModal: HTMLDialogElement | undefined = $state();
+	let termsOfServiceModal: HTMLDialogElement | undefined = $state();
+	let partnersRecordModal: HTMLDialogElement | undefined = $state();
 
-	let filteredCredits = $derived(
-		CREDITS_DATA.filter((item) => {
-			const query = creditSearch.toLowerCase().trim();
-			const matchesSearch =
-				!query ||
-				item.name.toLowerCase().includes(query) ||
-				item.description.toLowerCase().includes(query) ||
-				item.license.toLowerCase().includes(query);
-			const matchesCategory = creditCategory === 'all' || item.category === creditCategory;
-			return matchesSearch && matchesCategory;
-		})
-	);
-
-	onMount(() => {
-		// 描画前に初期テーマを適用
-		const saved = localStorage.getItem(STORAGE_KEYS.THEME) || 'dark';
-		if (saved === 'system') {
-			const isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-			document.documentElement.setAttribute('data-theme', isDark ? 'dark' : 'light');
-		} else {
-			document.documentElement.setAttribute('data-theme', saved);
-		}
-	});
-
-	let eligibilityModal: HTMLDialogElement;
-	onMount(async () => {
-		// 年齢制限・利用資格の確認
-		const eligibility = localStorage.getItem(STORAGE_KEYS.ELIGIBILITY) || 'unconfirmed';
-		if (eligibility !== 'confirmed') {
-			await waitForModalClose(eligibilityModal);
-		}
-		localStorage.setItem(STORAGE_KEYS.ELIGIBILITY, 'confirmed');
-	});
-
-	onMount(() => {
-		const hasConnected = localStorage.getItem(STORAGE_KEYS.HAS_CONNECTED);
-		if (hasConnected === 'true') {
-			isFirstConnect = false;
-		}
-	});
-
-	type Theme = 'dark' | 'light' | 'system';
-	type ConnectionStatus = 'disconnected' | 'connecting' | 'waiting' | 'paired';
-	type LogType = 'sent' | 'received' | 'system';
-
-	interface LogItem {
-		id: string;
-		text: string;
-		type: LogType;
-		time: string;
-	}
-
-	let lastMessageTime: number | null = null;
-	let elapsedSeconds: number | null = null;
-	let partnersRecord = new SvelteMap<string, string[]>();
-	let userId: string = '';
-	let partnerId: string = '';
-	let isFirstConnect = $state(true);
-	let creditModal: HTMLDialogElement;
-	let privacyPolicyModal: HTMLDialogElement;
-	let structureNoteModal: HTMLDialogElement;
-	let termsOfServiceModal: HTMLDialogElement;
-	let partnersRecordModal: HTMLDialogElement;
-	let theme = $state<Theme>('dark');
-	let status = $state<ConnectionStatus>('disconnected'); // 現在の通信状態
-	let isPaired = $state(false); // ペアリング済みかどうか
-	let socket: WebSocket | null = null; // 通信の本体
-	let inputText = $state('');
-	let logs = $state<LogItem[]>([]); // チャットの履歴
-	let partnerText = $state<string>('');
 	let lang: HTMLSelectElement | undefined = $state();
 	let waiting_count = $state(0);
 	let matched_count = $state(0);
-	let languageNotSelected = $state(false);
-
-	onMount(() => {
-		userId = getOrCreateDeviceId();
-	});
-
-	function applyTheme(targetTheme: Theme) {
-		const root = document.documentElement;
-		if (targetTheme === 'system') {
-			const systemIsDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-			root.setAttribute('data-theme', systemIsDark ? 'dark' : 'light');
-		} else {
-			root.setAttribute('data-theme', targetTheme);
-		}
-	}
-
-	function changeTheme(newTheme: Theme) {
-		theme = newTheme;
-		localStorage.setItem(STORAGE_KEYS.THEME, newTheme);
-		applyTheme(newTheme);
-	}
-
-	onMount(() => {
-		const savedTheme = (localStorage.getItem(STORAGE_KEYS.THEME) as Theme) || 'dark';
-		theme = savedTheme;
-		applyTheme(savedTheme);
-
-		// OSのテーマ変更を監視
-		const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
-		const handleSystemChange = () => {
-			if (theme === 'system') {
-				applyTheme('system');
-			}
-		};
-
-		mediaQuery.addEventListener('change', handleSystemChange);
-
-		return () => mediaQuery.removeEventListener('change', handleSystemChange);
-	});
-
-	async function fetchPeopleCount() {
-		try {
-			const res = await fetch('http://localhost:3000/api/get_people_count');
-			let data = await res.json();
-			waiting_count = data['waiting'];
-			matched_count = data['matched'];
-		} catch (err) {
-			console.error(err);
-		}
-	}
-
-	onMount(() => {
-		fetchPeopleCount();
-
-		const interval = setInterval(fetchPeopleCount, 1000);
-
-		return () => clearInterval(interval);
-	});
-
-	function getCurrentTime(): string {
-		const now = new Date();
-		return now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-	}
-
-	function addLog(text: string, type: LogType) {
-		logs = [...logs, { id: crypto.randomUUID(), text, type, time: getCurrentTime() }];
-	}
-
-	// $effect(() => {
-	//   // ログ追加時に自動スクロール
-	//   if (logs.length > 0 && logsContainer) {
-	//     logsContainer.scrollTop = logsContainer.scrollHeight;
-	//   }
-	// });
 
 	function waitForModalClose(dialogElement: HTMLDialogElement): Promise<void> {
 		return new Promise((resolve) => {
@@ -172,481 +30,69 @@
 		});
 	}
 
-	async function connect() {
-		if (socket) return;
+	onMount(() => {
+		const cleanupTheme = initTheme();
+		chatStore.init();
 
-		if (lang && lang.value === 'not-selected') {
-			languageNotSelected = true;
-			return;
-		} else {
-			languageNotSelected = false;
-		}
-		if (isFirstConnect) {
-			await waitForModalClose(structureNoteModal);
-			isFirstConnect = false;
-			localStorage.setItem(STORAGE_KEYS.HAS_CONNECTED, 'true');
-		}
-
-		status = 'connecting';
-		isPaired = false;
-		addLog('WebSocket サーバー (ws://127.0.0.1:3000/ws) へ接続中...', 'system');
-
-		const wsUrl = `ws://127.0.0.1:3000/ws?user_id=${userId}&lang=${lang?.value}`;
-
-		socket = new WebSocket(wsUrl);
-
-		socket.onopen = () => {
-			status = 'waiting';
-			addLog('サーバーへの接続に成功しました。ペアリング待機中...', 'system');
-		};
-
-		socket.onmessage = (event: MessageEvent) => {
-			try {
-				const data: Types.Message = JSON.parse(event.data);
-				if (data.type === 'system') {
-					if (data.event.type === 'matching_completed') {
-						status = 'paired';
-						isPaired = true;
-						partnerId = data.event.partner_id;
-						if (!partnersRecord.has(partnerId)) {
-							partnersRecord.set(partnerId, []);
-						}
-						lastMessageTime = null;
-					} else if (data.event.type === 'partner_disconnected') {
-						isPaired = false;
-						status = 'disconnected';
-						disconnect();
-						lastMessageTime = null;
-						elapsedSeconds = null;
-						console.log(partnersRecord.values());
-					} else if (data.event.type === 'failed_to_send_message') {
-						console.error('メッセージの送信に失敗');
-					}
-				} else if (data.type === 'chat') {
-					const currentTime = performance.now();
-					partnerText = data.content;
-
-					let currentRecord = partnersRecord.get(partnerId) ?? [];
-					const isNewMessageBlock =
-						lastMessageTime === null ||
-						(currentTime - lastMessageTime) / 1000 > 1.0 ||
-						currentRecord.length === 0;
-
-					if (isNewMessageBlock) {
-						currentRecord = [...currentRecord, partnerText];
-					} else {
-						currentRecord = [...currentRecord.slice(0, -1), partnerText];
-					}
-					partnersRecord.set(partnerId, currentRecord);
-					lastMessageTime = currentTime;
-				} else {
-					console.error('不明なメッセージ');
-				}
-			} catch (err) {
-				console.error('メッセージのパースに失敗:', err);
+		// 年齢制限・利用資格の確認
+		const checkEligibility = async () => {
+			const eligibility = localStorage.getItem(STORAGE_KEYS.ELIGIBILITY) || 'unconfirmed';
+			if (eligibility !== 'confirmed' && eligibilityModal) {
+				await waitForModalClose(eligibilityModal);
 			}
+			localStorage.setItem(STORAGE_KEYS.ELIGIBILITY, 'confirmed');
 		};
+		checkEligibility();
 
-		socket.onerror = () => {
-			addLog('通信エラーが発生しました。', 'system');
+		// 人数取得のポーリング
+		const updatePeopleCount = async () => {
+			const res = await fetchPeopleCount();
+			waiting_count = res.waiting;
+			matched_count = res.matched;
 		};
+		updatePeopleCount();
+		const interval = setInterval(updatePeopleCount, 1000);
 
-		socket.onclose = () => {
-			status = 'disconnected';
-			isPaired = false;
-			addLog('WebSocket 接続が切断されました。', 'system');
-			socket = null;
-			partnerText = '';
+		return () => {
+			cleanupTheme();
+			clearInterval(interval);
 		};
-	}
+	});
 
-	function disconnect() {
-		if (socket) {
-			socket.close();
-			socket = null;
-		}
-		status = 'disconnected';
-		isPaired = false;
-		partnerText = '';
-	}
-
-	function sendMessage() {
-		if (!isPaired || !socket) return;
-		const messageToSend = inputText.trim();
-		let data: Types.Message = {
-			type: 'chat',
-			content: messageToSend
-		};
-		socket.send(JSON.stringify(data)); // サーバーへ送信
-		addLog(messageToSend, 'sent');
-	}
-
-	async function reportPartner(id: string, reason: Types.ReportReason, chat: string[]) {
-		let reportRequest: Types.ReportRequest = {
-			target_user_id: id,
-			reason: reason,
-			chat: chat,
-		};
-		try {
-			await fetch('http://localhost:3000/api/report', {
-				method: 'POST',
-				headers: {
-					'Content-Type': 'application/json'
-				},
-				body: JSON.stringify(reportRequest)
-			});
-		} catch (err) {
-			console.error(err);
-		}
+	async function handleConnect() {
+		await chatStore.connect(lang?.value, async () => {
+			if (structureNoteModal) {
+				await waitForModalClose(structureNoteModal);
+			}
+		});
 	}
 
 	onDestroy(() => {
-		disconnect();
+		chatStore.disconnect();
 	});
 </script>
 
-<!-- 利用資格 -->
-<dialog bind:this={eligibilityModal} class="modal">
-	<div class="modal-box">
-		<h3 class="text-lg font-bold">利用資格の確認</h3>
-		<p class="py-4">
-			当アプリケーションは13歳未満の利用を禁止しています。また、未成年者の利用には保護者の同意が必要です。
-		</p>
-		<p class="py-4">利用規約の同意も必要です。</p>
-		<button class="btn" onclick={() => termsOfServiceModal.showModal()}>利用規約</button>
-		<p class="py-4">
-			OKボタンを押すと、利用規約と利用資格要件を満たしていることに同意したものとみなされます。要件を満たしていない場合は、このサイトを閉じてください。
-		</p>
-		<div class="modal-action">
-			<form method="dialog">
-				<button class="btn">OK</button>
-			</form>
-		</div>
-	</div>
-</dialog>
-
-<!-- テキストがリアルタイム送信されることの警告 -->
-<dialog bind:this={structureNoteModal} class="modal modal-bottom sm:modal-middle">
-	<div class="modal-box">
-		<h3 class="text-lg font-bold">⚠️注意</h3>
-		<p class="py-4">
-			送信ボタンを押す前の入力中テキストが相手に見えます。そのため、個人情報や機密情報の流出には十分気を付けてください。<strong
-				>Vanitはその責任を一切負いません。</strong
-			>
-		</p>
-		<div class="modal-action">
-			<form method="dialog">
-				<!-- if there is a button in form, it will close the modal -->
-				<button class="btn">OK</button>
-			</form>
-		</div>
-	</div>
-</dialog>
-
-<!-- プライバシーポリシー -->
-<dialog bind:this={privacyPolicyModal} class="modal">
-	<div class="modal-box">
-		<h2 class="text-lg font-bold">プライバシーポリシー</h2>
-
-		<h3 class="mt-4">チャットログの保持方針について</h3>
-		<hr />
-		<p>全会話内容はリアルタイム中継のみであり、サーバー上に記録・保存しません。</p>
-
-		<h3 class="mt-4">取得するアクセス権限について</h3>
-		<hr />
-		<p>TODO</p>
-
-		<h3 class="mt-4">第三者サービスの利用</h3>
-		<hr />
-		<p>TODO</p>
-
-		<div class="modal-action">
-			<form method="dialog">
-				<button class="btn">Close</button>
-			</form>
-		</div>
-	</div>
-	<form method="dialog" class="modal-backdrop">
-		<button>close</button>
-	</form>
-</dialog>
-
-<!-- クレジット -->
-<dialog bind:this={creditModal} class="modal">
-	<div
-		class="modal-box flex max-h-[85vh] min-h-[85vh] w-11/12 max-w-4xl flex-col rounded-2xl border border-base-300 bg-base-100 p-6 shadow-2xl"
-	>
-		<div class="flex items-center justify-between border-b border-base-300 pb-3">
-			<div>
-				<h2 class="flex items-center gap-2 text-2xl font-bold text-base-content">
-					<svg
-						xmlns="http://www.w3.org/2000/svg"
-						class="h-6 w-6 text-primary"
-						fill="none"
-						viewBox="0 0 24 24"
-						stroke="currentColor"
-					>
-						<path
-							stroke-linecap="round"
-							stroke-linejoin="round"
-							stroke-width="2"
-							d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"
-						/>
-					</svg>
-					オープンソース・ライセンス表記
-				</h2>
-				<p class="mt-1 text-xs text-base-content/70">
-					Vanit
-					の開発には以下のオープンソースソフトウェアが使用されています。各開発者・コミュニティに感謝いたします。
-				</p>
-			</div>
-		</div>
-
-		<!-- フィルター・検索バー -->
-		<div class="flex flex-wrap items-center justify-between gap-3 py-4">
-			<!-- カテゴリタブ -->
-			<div class="join rounded-xl bg-base-200 p-1">
-				<button
-					class="btn join-item border-none btn-xs sm:btn-sm {creditCategory === 'all'
-						? 'shadow-sm btn-primary'
-						: 'btn-ghost text-base-content/70'}"
-					onclick={() => (creditCategory = 'all')}
-				>
-					すべて ({CREDITS_DATA.length})
-				</button>
-				<button
-					class="btn join-item border-none btn-xs sm:btn-sm {creditCategory === 'frontend'
-						? 'shadow-sm btn-primary'
-						: 'btn-ghost text-base-content/70'}"
-					onclick={() => (creditCategory = 'frontend')}
-				>
-					Frontend ({CREDITS_DATA.filter((c) => c.category === 'frontend').length})
-				</button>
-				<button
-					class="btn join-item border-none btn-xs sm:btn-sm {creditCategory === 'backend'
-						? 'shadow-sm btn-primary'
-						: 'btn-ghost text-base-content/70'}"
-					onclick={() => (creditCategory = 'backend')}
-				>
-					Backend ({CREDITS_DATA.filter((c) => c.category === 'backend').length})
-				</button>
-			</div>
-
-			<div class="flex max-w-xs flex-1 gap-2">
-				<!-- 検索インプット -->
-				<input
-					type="text"
-					bind:value={creditSearch}
-					placeholder="ライブラリ名・ライセンスで検索..."
-					class="input-bordered input w-full rounded-lg input-sm"
-				/>
-			</div>
-		</div>
-
-		<!-- リスト表示エリア -->
-		<div class="my-2 flex-1 space-y-3 overflow-y-auto pr-1">
-			{#if filteredCredits.length === 0}
-				<div class="py-10 text-center text-base-content/60">
-					一致するライブラリが見つかりませんでした。
-				</div>
-			{:else}
-				{#each filteredCredits as item (item.name)}
-					<div
-						class="rounded-xl border border-base-300 bg-base-200/50 p-4 transition-all duration-200 hover:border-primary/40"
-					>
-						<div class="flex items-start justify-between gap-2">
-							<div class="flex flex-wrap items-center gap-2">
-								<a
-									href={item.homepage}
-									target="_blank"
-									rel="noopener noreferrer"
-									class="flex items-center gap-1 text-base font-bold text-primary hover:underline"
-								>
-									{item.name}
-									<svg
-										xmlns="http://www.w3.org/2000/svg"
-										class="h-3.5 w-3.5 opacity-70"
-										fill="none"
-										viewBox="0 0 24 24"
-										stroke="currentColor"
-									>
-										<path
-											stroke-linecap="round"
-											stroke-linejoin="round"
-											stroke-width="2"
-											d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"
-										/>
-									</svg>
-								</a>
-								<span class="badge badge-outline font-mono text-xs badge-sm">{item.version}</span>
-								<span class="badge text-xs badge-sm capitalize badge-neutral">{item.category}</span>
-							</div>
-							<span class="badge text-xs badge-sm font-semibold whitespace-nowrap badge-accent">
-								{item.license}
-							</span>
-						</div>
-
-						<p class="mt-2 text-xs leading-relaxed text-base-content/80">
-							{item.description}
-						</p>
-
-						{#if item.author}
-							<div class="mt-2 flex items-center gap-1 text-[0.75rem] text-base-content/60">
-								<span>© {item.author}</span>
-							</div>
-						{/if}
-					</div>
-				{/each}
-			{/if}
-		</div>
-
-		<!-- フッターアクション -->
-		<div class="modal-action mt-2 flex items-center justify-between border-t border-base-300 pt-3">
-			<span class="text-xs text-base-content/60">
-				表示中: {filteredCredits.length} / {CREDITS_DATA.length} 件
-			</span>
-			<form method="dialog">
-				<button class="btn btn-ghost btn-sm">閉じる</button>
-			</form>
-		</div>
-	</div>
-	<form method="dialog" class="modal-backdrop">
-		<button>close</button>
-	</form>
-</dialog>
-
-<!-- やりとり相手の履歴 -->
-<dialog bind:this={partnersRecordModal} class="modal">
-	<div class="modal-box h-128">
-		<form method="dialog">
-			<button class="btn absolute top-2 right-2 btn-circle btn-ghost btn-sm">✕</button>
-		</form>
-		<h3 class="text-lg font-bold">パートナー履歴</h3>
-		{#if partnersRecord.size === 0}
-			<p class="py-4 text-sm text-base-content/60">まだ履歴はありません。</p>
-		{:else}
-			<ul class="list mt-4 space-y-3">
-				{#each partnersRecord as [partner_id, chat], i (partner_id)}
-					<li
-						class="list-row flex items-center justify-between gap-2 rounded-lg border border-base-300 p-3"
-					>
-						<div class="flex-1 overflow-hidden">
-							<div class="font-mono text-xs text-base-content/70">ID: {partner_id}</div>
-							<div class="mt-1 text-sm font-medium text-base-content">
-								{#if chat.length > 0}
-									{chat.join(' / ')}
-								{:else}
-									<span class="text-base-content/50 italic">（メッセージなし）</span>
-								{/if}
-							</div>
-						</div>
-						<div class="relative">
-							<button
-								class="btn btn-sm btn-warning"
-								popovertarget="popover-{i}"
-								style="anchor-name:--anchor-{i}"
-							>
-								通報する
-							</button>
-							<ul
-								class="menu dropdown w-52 rounded-box border border-base-300 bg-base-100 p-2 shadow-lg"
-								popover
-								id="popover-{i}"
-								style="position-anchor:--anchor-{i}"
-							>
-								{#each Types.REPORT_REASON as reason}
-									<li>
-										<button
-											class="text-xs"
-											onclick={async () => reportPartner(partner_id, reason, chat)}
-										>
-											{reason}
-										</button>
-									</li>
-								{/each}
-							</ul>
-						</div>
-					</li>
-				{/each}
-			</ul>
-		{/if}
-	</div>
-	<form method="dialog" class="modal-backdrop">
-		<button>close</button>
-	</form>
-</dialog>
-
-<!-- 利用規約 -->
-<dialog bind:this={termsOfServiceModal} class="modal">
-	<div class="modal-box w-11/12 max-w-5xl">
-		<h2 class="text-2xl font-extrabold">利用規約</h2>
-
-		<section class="mt-4 mb-4">
-			<h3 class="bm-2 text-xl font-bold">禁止事項</h3>
-			<ul>
-				<li>
-					<strong>ハラスメント・誹謗中傷:</strong> 相手を不快にさせる発言、ヘイトスピーチ、性的な表現、脅迫など。
-				</li>
-				<li>
-					<strong>晒し行為・プライバシー侵害:</strong>
-					チャット画面のスクリーンショットや録画を、相手に許可なくSNSに公開・拡散する行為。
-				</li>
-				<li>
-					<strong>違法行為・スパム:</strong> 詐欺、外部サイトへの悪質な誘導・勧誘・bot等による自動接続。
-				</li>
-			</ul>
-		</section>
-
-		<section class="mb-4">
-			<h3 class="bm-2 text-xl font-bold">免責事項</h3>
-			<p>以下の項目について運営は一切の責任を負いません。</p>
-			<ul>
-				<li>
-					<strong>ユーザー間トラブル:</strong> ユーザー同士の会話内容や発生したトラブル（損害・精神的苦痛等）
-				</li>
-				<li>
-					<strong>意図しない情報漏洩:</strong> ユーザーが誤って個人情報を入力・送信したことによる損害
-				</li>
-				<li>
-					<strong>サービスの中断・終了:</strong> サーバーダウン、メンテナンス、または予約の無いサービス内容変更・終了
-				</li>
-			</ul>
-		</section>
-
-		<section class="mb-4">
-			<h3 class="bm-2 text-xl font-bold">違反者への対応</h3>
-			<p>運営は利用規約に違反したユーザーに対し、事前予告なくアクセス遮断を行う権限を有します。</p>
-		</section>
-
-		<section class="mb-4">
-			<h3 class="bm-2 text-xl font-bold">利用資格</h3>
-			<ul>
-				<li>13歳以上であり、未成年者の場合は保護者の同意があること</li>
-				<li>利用規約に同意していること</li>
-			</ul>
-		</section>
-
-		<p class="py-4"></p>
-		<div class="modal-action">
-			<form method="dialog">
-				<button class="btn">Close</button>
-			</form>
-		</div>
-	</div>
-</dialog>
+<EligibilityModal
+	bind:dialog={eligibilityModal}
+	onOpenTerms={() => termsOfServiceModal?.showModal()}
+/>
+<StructureNoteModal bind:dialog={structureNoteModal} />
+<PrivacyPolicyModal bind:dialog={privacyPolicyModal} />
+<TermsModal bind:dialog={termsOfServiceModal} />
+<PartnersRecordModal bind:dialog={partnersRecordModal} partnersRecord={chatStore.partnersRecord} />
+<CreditsList bind:dialog={creditModal} />
 
 <header class="mt-3 flex border-b border-zinc-400">
 	<h1 class="m-auto mb-1 text-3xl font-bold text-base-content">Vanit</h1>
 	<select
-		value={theme}
-		onchange={(e) => changeTheme(e.currentTarget.value as Theme)}
+		bind:value={theme.current}
 		class="select m-auto w-32 select-ghost"
 	>
 		<option value="light">☀️Lignt</option>
 		<option value="dark">🌙Dark</option>
 		<option value="system">💻System</option>
 	</select>
-	<button class="btn m-auto" onclick={() => partnersRecordModal.showModal()}>履歴</button>
+	<button class="btn m-auto" onclick={() => partnersRecordModal?.showModal()}>履歴</button>
 </header>
 
 <main class="mx-auto max-w-6xl px-4 font-sans">
@@ -664,20 +110,20 @@
 	>
 		<div class="flex items-center gap-2.5 font-semibold">
 			<span
-				class="h-3 w-3 rounded-full transition-colors duration-200 {status === 'paired'
+				class="h-3 w-3 rounded-full transition-colors duration-200 {chatStore.status === 'paired'
 					? 'bg-green-700 shadow-[0_0_6px_rgba(46,125,50,0.5)]'
-					: status === 'waiting'
+					: chatStore.status === 'waiting'
 						? 'bg-amber-600'
-						: status === 'connecting'
+						: chatStore.status === 'connecting'
 							? 'bg-sky-600'
 							: 'bg-red-600'}"
 			></span>
 			<span class="min-w-64 text-base-content">
-				{#if status === 'paired'}
+				{#if chatStore.status === 'paired'}
 					ペアリング完了 (相互通信中)
-				{:else if status === 'waiting'}
+				{:else if chatStore.status === 'waiting'}
 					ペアリング相手を待機中...
-				{:else if status === 'connecting'}
+				{:else if chatStore.status === 'connecting'}
 					接続中...
 				{:else}
 					未接続
@@ -685,7 +131,7 @@
 			</span>
 		</div>
 
-		{#if languageNotSelected}
+		{#if chatStore.languageNotSelected}
 			<div role="alert" class="alert alert-warning">
 				<span>Please select a language</span>
 			</div>
@@ -697,21 +143,21 @@
 		>
 			<option disabled selected value="not-selected">Select your language</option>
 			<option value="ja">Japanese</option>
-            <option value="id">Indonesian</option>
-            <option value="fil">Filipino</option>
-            <option value="en">English</option>
-            <option value="vi">Vietnamese</option>
-            <option value="th">Thai</option>
-            <option value="ms">Malay</option>
-            <option value="zh">Chinese</option>
+			<option value="id">Indonesian</option>
+			<option value="fil">Filipino</option>
+			<option value="en">English</option>
+			<option value="vi">Vietnamese</option>
+			<option value="th">Thai</option>
+			<option value="ms">Malay</option>
+			<option value="zh">Chinese</option>
 		</select>
 
 		<div class="flex min-w-64 justify-end">
-			{#if status === 'disconnected'}
-				<button class="btn btn-outline btn-info" onclick={connect}> 接続する </button>
+			{#if chatStore.status === 'disconnected'}
+				<button class="btn btn-outline btn-info" onclick={handleConnect}> 接続する </button>
 			{:else}
-				<button class="btn btn-outline btn-secondary" onclick={disconnect}>
-					{#if status === 'waiting'}
+				<button class="btn btn-outline btn-secondary" onclick={() => chatStore.disconnect()}>
+					{#if chatStore.status === 'waiting'}
 						<span class="loading loading-sm loading-dots"></span>
 					{/if}
 					切断する
@@ -729,11 +175,11 @@
 				<span class="text-[0.85rem] font-semibold text-base-content">相手のメッセージ</span>
 			</div>
 			<div class="flex items-center rounded-md bg-base-200 break-all text-base-content">
-				{#if partnerText}
+				{#if chatStore.partnerText}
 					<span
 						class="min-h-11 w-full rounded-md border border-zinc-300 p-14 text-base transition-all duration-200"
 					>
-						{partnerText}
+						{chatStore.partnerText}
 					</span>
 				{:else}
 					<span
@@ -752,12 +198,10 @@
 				id="user-input"
 				class="min-h-11 w-full rounded-md border border-zinc-300 p-14 text-base transition-all duration-200 outline-none focus:enabled:border-blue-600 disabled:cursor-not-allowed disabled:bg-base-200"
 				type="text"
-				bind:value={inputText}
-				disabled={!isPaired}
-				// onchange={sendMessage}
-				// onkeypress={sendMessage}
-				oninput={sendMessage}
-				placeholder={isPaired
+				bind:value={chatStore.inputText}
+				disabled={!chatStore.isPaired}
+				oninput={() => chatStore.sendMessage()}
+				placeholder={chatStore.isPaired
 					? 'メッセージを入力してください...'
 					: '接続してペアリングすると入力できます'}
 			/>
@@ -767,9 +211,9 @@
 
 <footer class="mt-3 items-center justify-center text-center">
 	<div class="mt-3 flex justify-center gap-32">
-		<button class="btn" onclick={() => termsOfServiceModal.showModal()}>利用規約</button>
-		<button class="btn" onclick={() => privacyPolicyModal.showModal()}>プライバシーポリシー</button>
-		<button class="btn" onclick={() => creditModal.showModal()}>クレジット</button>
+		<button class="btn" onclick={() => termsOfServiceModal?.showModal()}>利用規約</button>
+		<button class="btn" onclick={() => privacyPolicyModal?.showModal()}>プライバシーポリシー</button>
+		<button class="btn" onclick={() => creditModal?.showModal()}>クレジット</button>
 	</div>
 	<p class="mt-4">© 2026 Vanit by hino-rs. All Rights Reserved.</p>
 </footer>
