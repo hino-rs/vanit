@@ -1,2 +1,5 @@
 m.md
 .env
+.env.local
+private
+.neon

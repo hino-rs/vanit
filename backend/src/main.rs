@@ -9,6 +9,7 @@ use axum::{
     routing::{get, post},
 };
 use log::info;
+use sqlx::postgres::PgPoolOptions;
 use std::{net::SocketAddr, sync::Arc};
 use tower_http::cors::CorsLayer;
 
@@ -23,8 +24,6 @@ async fn main() -> Result<(), anyhow::Error> {
         .init();
     let cors = CorsLayer::permissive();
 
-    let mut app_state = AppState::default();
-
     if let Ok(path) = std::env::current_dir() {
         info!("カレントディレクトリ: {path:?}");
     }
@@ -38,9 +37,34 @@ async fn main() -> Result<(), anyhow::Error> {
         Err(e) => info!("OPENAI_API_KEY 取得失敗: {:?}", e),
     }
 
+    let database_url = dotenvy::from_path_iter(".env")
+        .ok()
+        .and_then(|iter| {
+            iter.filter_map(Result::ok)
+                .find(|(key, _)| key == "DATABASE_URL")
+                .map(|(_, value)| value)
+        })
+        .or_else(|| std::env::var("DATABASE_URL").ok())
+        .ok_or_else(|| anyhow::anyhow!("DATABASE_URL が設定されていません"))?;
+    // sqlxがchannel_bindingパラメータを認識せず接続がハングするため、
+    // Neon が付与するこのクエリパラメータを取り除いてから接続する。
+    let database_url = database_url
+        .replace("channel_binding=require&", "")
+        .replace("&channel_binding=require", "")
+        .replace("?channel_binding=require", "?");
+    let db_pool = PgPoolOptions::new()
+        .max_connections(5)
+        .connect(&database_url)
+        .await?;
+    info!("Neon (Postgres) への接続に成功しました");
+
     let openai_client = Client::new();
 
-    app_state.openai_client = openai_client;
+    let app_state = AppState {
+        pair_manager: Default::default(),
+        openai_client,
+        _db_pool: db_pool,
+    };
 
     let state = Arc::new(app_state);
 

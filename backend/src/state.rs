@@ -4,6 +4,7 @@ use async_openai::{Client, config::OpenAIConfig};
 use chrono::{DateTime, Duration, Utc};
 use dashmap::DashMap;
 use log::info;
+use sqlx::PgPool;
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
@@ -66,10 +67,10 @@ pub struct User {
     pub language: Language,
 }
 
-#[derive(Default)]
 pub struct AppState {
     pub pair_manager: PairManager,
     pub openai_client: Client<OpenAIConfig>,
+    pub _db_pool: PgPool,
 }
 /// ペア管理システム
 #[derive(Default)]
